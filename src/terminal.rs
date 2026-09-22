@@ -1,11 +1,11 @@
-use crossterm::{
-    cursor,
-    execute,
-    terminal::{self, disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-    ExecutableCommand,
-};
-use std::io::{stdout, Write, BufWriter};
 use crate::framebuffer::Framebuffer;
+use crossterm::{
+    ExecutableCommand, cursor, execute,
+    terminal::{
+        self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    },
+};
+use std::io::{BufWriter, Write, stdout};
 
 pub struct TerminalGuard;
 
@@ -13,8 +13,7 @@ impl TerminalGuard {
     pub fn new() -> Result<Self, std::io::Error> {
         enable_raw_mode()?;
         execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
-        // Clear the screen once at startup
-        execute!(stdout(), terminal::Clear(terminal::ClearType::All));
+        execute!(stdout(), terminal::Clear(terminal::ClearType::All))?;
         Ok(Self)
     }
 }
