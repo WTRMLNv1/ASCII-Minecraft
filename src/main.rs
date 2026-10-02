@@ -6,9 +6,7 @@ mod terminal;
 use framebuffer::Framebuffer;
 use terminal::{Terminal, TerminalGuard};
 
-use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, ModifierKeyCode, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
 
 use std::fs::File;
 use std::io::Write;
@@ -19,6 +17,10 @@ use crate::math::mat::Mat4;
 use crate::math::vec::Vec3;
 use crate::rendering::camera::Camera;
 use crate::rendering::pipeline::{project_vertex_with_depth, rasterize_triangle, shade_char};
+use windows_sys::Win32::Foundation::POINT;
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetSystemMetrics, SetCursorPos, SM_CXSCREEN, SM_CYSCREEN,
+};
 
 #[derive(Clone, Copy)]
 struct Triangle {
@@ -45,9 +47,7 @@ impl MovementInput {
             KeyCode::Char('a' | 'A') => self.left = pressed,
             KeyCode::Char('d' | 'D') => self.right = pressed,
             KeyCode::Char(' ') => self.up = pressed,
-            KeyCode::Modifier(ModifierKeyCode::LeftShift | ModifierKeyCode::RightShift) => {
-                self.down = pressed;
-            }
+            KeyCode::Char('c' | 'C') => self.down = pressed,
             _ => {}
         }
     }
@@ -78,6 +78,66 @@ impl MovementInput {
     }
 }
 
+struct RelativeMouseLook;
+
+impl RelativeMouseLook {
+    fn new() -> std::io::Result<Self> {
+        let mouse_look = Self;
+        mouse_look.recenter()?;
+        Ok(mouse_look)
+    }
+
+    fn update_camera(&self, camera: &mut Camera) -> std::io::Result<()> {
+        let center = screen_center()?;
+        let mut cursor = POINT { x: 0, y: 0 };
+
+        // SAFETY: `cursor` is valid writable storage for the Win32 API.
+        if unsafe { GetCursorPos(&mut cursor) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        let dx = (cursor.x - center.x) as f32;
+        let dy = (cursor.y - center.y) as f32;
+        if dx != 0.0 || dy != 0.0 {
+            // Screen Y increases downwards; a positive pitch looks up.
+            camera.update_rotation(dx, -dy, 0.0025);
+        }
+
+        // SAFETY: the coordinates came from the primary display's screen-space center.
+        if unsafe { SetCursorPos(center.x, center.y) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+
+    fn recenter(&self) -> std::io::Result<()> {
+        let center = screen_center()?;
+
+        // SAFETY: the coordinates came from the primary display's screen-space center.
+        if unsafe { SetCursorPos(center.x, center.y) } == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+
+        Ok(())
+    }
+}
+
+fn screen_center() -> std::io::Result<POINT> {
+    // SAFETY: GetSystemMetrics has no pointer arguments and is safe to query repeatedly.
+    let width = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+    // SAFETY: GetSystemMetrics has no pointer arguments and is safe to query repeatedly.
+    let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+    if width <= 0 || height <= 0 {
+        return Err(std::io::Error::other("could not determine the display size"));
+    }
+
+    Ok(POINT {
+        x: width / 2,
+        y: height / 2,
+    })
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("[debug] main started");
 
@@ -87,8 +147,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let guard = TerminalGuard::new()?;
 
-    let width = 120;
-    let height = 40;
+    let width = 240;
+    let height = 80;
 
     let mut terminal = Terminal::new(width, height)?;
     let mut fb = Framebuffer::new(width, height);
@@ -100,9 +160,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut running = true;
     let mut frame_count = 0_u64;
     let mut last_debug_frame = Instant::now();
-    let mut last_mouse_pos: Option<(u16, u16)> = None;
     let mut last_frame_start = Instant::now();
     let mut input = MovementInput::default();
+    let mouse_look = RelativeMouseLook::new()?;
 
     // Cube definition
     let vertices = [
@@ -179,18 +239,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     input.update(key);
                 }
-            } else if let Event::Mouse(mouse_event) = ev
-                && let MouseEventKind::Moved = mouse_event.kind
-            {
-                if let Some((last_x, last_y)) = last_mouse_pos {
-                    let dx = (mouse_event.column as f32) - (last_x as f32);
-                    let dy = (mouse_event.row as f32) - (last_y as f32);
-                    // Screen rows increase downward, while positive pitch looks up.
-                    camera.update_rotation(dx, -dy, 0.005);
-                }
-                last_mouse_pos = Some((mouse_event.column, mouse_event.row));
             }
         }
+
+        mouse_look.update_camera(&mut camera)?;
 
         // 2. Update
         fb.clear();
@@ -269,7 +321,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        let status = "ASCII Minecraft | WASD move | Space up | Shift down | mouse look | q quits";
+        let status = "ASCII Minecraft | WASD move | Space up | C down | mouse look | q quits";
         for (x, ch) in status.chars().take(width).enumerate() {
             fb.set(x, height - 1, ch);
         }
