@@ -6,7 +6,7 @@ mod terminal;
 use framebuffer::Framebuffer;
 use terminal::{Terminal, TerminalGuard};
 
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, MouseEventKind};
 
 use std::fs::File;
 use std::io::Write;
@@ -17,6 +17,7 @@ use crate::math::mat::Mat4;
 use crate::math::vec::Vec3;
 use crate::rendering::camera::Camera;
 use crate::rendering::pipeline::{project_vertex_with_depth, rasterize_triangle, shade_char};
+
 
 #[derive(Clone, Copy)]
 struct Triangle {
@@ -46,6 +47,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let start_time = Instant::now();
     let mut frame_count = 0_u64;
     let mut last_debug_frame = Instant::now();
+    let mut last_mouse_pos: Option<(u16, u16)> = None;
+
+    let mut move_dir = Vec3::new(0.0, 0.0, 0.0);
 
     // Cube definition
     let vertices = [
@@ -98,7 +102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     ];
 
-    let camera = Camera::new(
+    let mut camera = Camera::new(
         Vec3::new(0.0, 0.0, 5.0),
         0.0, // yaw
         0.0, // pitch
@@ -109,11 +113,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let frame_start = Instant::now();
 
         // 1. Poll input
-        if event::poll(Duration::from_millis(1))? {
-            if let Event::Key(key) = event::read()? {
-                if let KeyCode::Char('q') = key.code {
-                    writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
-                    running = false;
+        let mut current_move_dir = Vec3::new(0.0, 0.0, 0.0);
+        while event::poll(Duration::from_millis(1))? {
+            let ev = event::read()?;
+            if let Event::Key(key) = ev {
+                if let KeyCode::Char(c) = key.code {
+                    match c {
+                        'q' => {
+                            writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
+                            running = false;
+                        }
+                        'w' => current_move_dir = Vec3::add(current_move_dir, camera.get_forward()),
+                        's' => current_move_dir = Vec3::sub(current_move_dir, camera.get_forward()),
+                        'a' => current_move_dir = Vec3::sub(current_move_dir, camera.get_right()),
+                        'd' => current_move_dir = Vec3::add(current_move_dir, camera.get_right()),
+                        _ => {}
+                    }
+                }
+            } else if let Event::Mouse(mouse_event) = ev {
+                if let MouseEventKind::Moved = mouse_event.kind {
+                    if let Some((last_x, last_y)) = last_mouse_pos {
+                        let dx = (mouse_event.column as f32) - (last_x as f32);
+                        let dy = (mouse_event.row as f32) - (last_y as f32);
+                        camera.update_rotation(dx, dy, 0.005);
+                    }
+                    last_mouse_pos = Some((mouse_event.column, mouse_event.row));
                 }
             }
         }
@@ -121,7 +145,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 2. Update
         fb.clear();
 
+        let delta_time = frame_start.elapsed().as_secs_f32();
         let elapsed = start_time.elapsed().as_secs_f32();
+
+        // Update camera position
+        let speed = 5.0;
+        let move_vec = Vec3::mul_scalar(current_move_dir.normalize(), speed * delta_time);
+        camera.position = Vec3::add(camera.position, move_vec);
+
+
+        // Handle WASD movement
+        // Note: In a real game, we'd handle key-down/key-up states.
+        // For this simple loop, we check for a single key press per poll.
+        // To implement smooth movement, we'd need a different input architecture.
+        // However, for now we will just update based on the polled events.
+        // (Wait, the current Event::Key handler above consumes the event).
+        // I'll modify the event loop to set movement flags.
+
 
         // Model matrix: rotate the cube over time
         let model = Mat4::multiply(

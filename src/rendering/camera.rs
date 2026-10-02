@@ -18,19 +18,41 @@ impl Camera {
         }
     }
 
-    pub fn get_view_matrix(&self) -> Mat4 {
-        let forward = Vec3::new(
+    pub fn get_forward(&self) -> Vec3 {
+        Vec3::new(
             self.yaw.sin() * self.pitch.cos(),
             self.pitch.sin(),
             -self.yaw.cos() * self.pitch.cos(),
         )
-        .normalize();
+        .normalize()
+    }
 
+    pub fn get_right(&self) -> Vec3 {
+        let forward = self.get_forward();
         let world_up = Vec3::new(0.0, 1.0, 0.0);
-        let right = Vec3::cross(forward, world_up).normalize();
-        let up = Vec3::cross(right, forward).normalize();
+        Vec3::cross(forward, world_up).normalize()
+    }
+
+    pub fn get_up(&self) -> Vec3 {
+        let forward = self.get_forward();
+        let right = self.get_right();
+        Vec3::cross(right, forward).normalize()
+    }
+
+    pub fn update_rotation(&mut self, yaw_delta: f32, pitch_delta: f32, sensitivity: f32) {
+        self.yaw += yaw_delta * sensitivity;
+        self.pitch += pitch_delta * sensitivity;
+        let limit = 89.0f32.to_radians();
+        self.pitch = self.pitch.clamp(-limit, limit);
+    }
+
+    pub fn get_view_matrix(&self) -> Mat4 {
+        let forward = self.get_forward();
+        let right = self.get_right();
+        let up = self.get_up();
 
         let mut m = Mat4::identity();
+
 
         // Orientation part
         m.data[0] = right.x;
