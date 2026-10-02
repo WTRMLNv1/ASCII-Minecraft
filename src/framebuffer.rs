@@ -2,6 +2,7 @@ pub struct Framebuffer {
     pub width: usize,
     pub height: usize,
     pub cells: Vec<char>,
+    pub depth: Vec<f32>,
 }
 
 impl Framebuffer {
@@ -10,6 +11,7 @@ impl Framebuffer {
             width,
             height,
             cells: vec![' '; width * height],
+            depth: vec![f32::INFINITY; width * height],
         }
     }
 
@@ -17,11 +19,29 @@ impl Framebuffer {
         for cell in self.cells.iter_mut() {
             *cell = ' ';
         }
+        for depth in self.depth.iter_mut() {
+            *depth = f32::INFINITY;
+        }
     }
 
     pub fn set(&mut self, x: usize, y: usize, ch: char) {
         if x < self.width && y < self.height {
             self.cells[y * self.width + x] = ch;
         }
+    }
+
+    pub fn set_with_depth(&mut self, x: usize, y: usize, depth: f32, ch: char) -> bool {
+        if x >= self.width || y >= self.height {
+            return false;
+        }
+
+        let idx = y * self.width + x;
+        if depth < self.depth[idx] {
+            self.depth[idx] = depth;
+            self.cells[idx] = ch;
+            return true;
+        }
+
+        false
     }
 }
