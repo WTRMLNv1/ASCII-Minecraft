@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use noise::{NoiseFn, Fbm, Perlin};
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const WORLD_HEIGHT: i32 = 64;
@@ -28,6 +29,9 @@ pub struct Chunk {
 pub struct World {
     seed: u64,
     chunks: HashMap<(i32, i32), Chunk>,
+    terrain_noise: Fbm<Perlin>,
+    direction_noise: Perlin,
+    scale: f64,
 }
 
 impl World {
@@ -35,6 +39,9 @@ impl World {
         Self {
             seed,
             chunks: HashMap::new(),
+            terrain_noise: Fbm::<Perlin>::new(seed as u32),
+            direction_noise: Perlin::new(seed as u32),
+            scale: 0.05,
         }
     }
 
@@ -104,19 +111,24 @@ impl World {
     }
 
     fn surface_height(&self, x: i32, z: i32) -> i32 {
-        // Each axis is a seeded walk: 20% unchanged, 60% +/-1, 10% +/-2,
-        // and the rest divided evenly across +/-3, +/-4, +/-5. Averaging
-        // both walks makes a continuous 2D terrain with <= 5-layer neighbours.
-        (32 + (self.axis_walk(x, 0x9e37_79b9_7f4a_7c15) + self.axis_walk(z, 0xd1b5_4a32_d192_ed03))
-            / 2)
-        .clamp(1, WORLD_HEIGHT - 2)
-    }
+        let n = self.terrain_noise.get([x as f64 * self.scale, z as f64 * self.scale]);
+        let roll = (n + 1.0) / 2.0;
 
-    fn axis_walk(&self, coordinate: i32, salt: u64) -> i32 {
-        let direction = if coordinate >= 0 { 1 } else { -1 };
-        (1..=coordinate.unsigned_abs())
-            .map(|step| terrain_step(hash(self.seed, step as i32 * direction, salt)))
-            .sum()
+        let magnitude = if roll < 0.20 {
+            0
+        } else if roll < 0.80 {
+            1
+        } else if roll < 0.90 {
+            2
+        } else {
+            5
+        };
+
+        let dir_n = self.direction_noise.get([x as f64 * self.scale, z as f64 * self.scale]);
+        let sign = if dir_n >= 0.0 { 1 } else { -1 };
+
+        (32 + (magnitude * sign))
+            .clamp(1, WORLD_HEIGHT - 2)
     }
 }
 
@@ -131,29 +143,6 @@ fn block_at_height(surface: i32, y: i32) -> Block {
     } else {
         Block::Stone
     }
-}
-fn terrain_step(r: u64) -> i32 {
-    match r % 100 {
-        0..20 => 0,
-        20..50 => -1,
-        50..80 => 1,
-        80..85 => -2,
-        85..90 => 2,
-        90..92 => -3,
-        92..94 => 3,
-        94..96 => -4,
-        96..98 => 4,
-        98 => -5,
-        _ => 5,
-    }
-}
-fn hash(seed: u64, coordinate: i32, salt: u64) -> u64 {
-    let mut v = seed ^ salt ^ (coordinate as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    v ^= v >> 30;
-    v = v.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    v ^= v >> 27;
-    v = v.wrapping_mul(0x94d0_49bb_1331_11eb);
-    v ^ (v >> 31)
 }
 #[derive(Clone, Copy)]
 enum FaceDirection {
