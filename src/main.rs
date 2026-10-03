@@ -2,11 +2,14 @@ mod framebuffer;
 mod math;
 mod rendering;
 mod terminal;
+mod world;
 
 use framebuffer::Framebuffer;
 use terminal::{Terminal, TerminalGuard};
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
+};
 
 use std::fs::File;
 use std::io::Write;
@@ -17,15 +20,11 @@ use crate::math::mat::Mat4;
 use crate::math::vec::Vec3;
 use crate::rendering::camera::Camera;
 use crate::rendering::pipeline::{project_vertex_with_depth, rasterize_triangle, shade_char};
+use crate::world::{Block, CHUNK_SIZE, World};
 use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetSystemMetrics, SetCursorPos, SM_CXSCREEN, SM_CYSCREEN,
+    GetCursorPos, GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN, SetCursorPos,
 };
-
-#[derive(Clone, Copy)]
-struct Triangle {
-    vertices: [usize; 3],
-}
 
 #[derive(Default)]
 struct MovementInput {
@@ -38,6 +37,10 @@ struct MovementInput {
 }
 
 impl MovementInput {
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+
     fn update(&mut self, key: KeyEvent) {
         let pressed = key.kind != KeyEventKind::Release;
 
@@ -78,16 +81,31 @@ impl MovementInput {
     }
 }
 
-struct RelativeMouseLook;
+struct RelativeMouseLook {
+    locked: bool,
+}
 
 impl RelativeMouseLook {
     fn new() -> std::io::Result<Self> {
-        let mouse_look = Self;
-        mouse_look.recenter()?;
+        let mut mouse_look = Self { locked: false };
+        mouse_look.lock()?;
         Ok(mouse_look)
     }
 
+    fn lock(&mut self) -> std::io::Result<()> {
+        self.locked = true;
+        self.recenter()
+    }
+
+    fn unlock(&mut self) {
+        self.locked = false;
+    }
+
     fn update_camera(&self, camera: &mut Camera) -> std::io::Result<()> {
+        if !self.locked {
+            return Ok(());
+        }
+
         let center = screen_center()?;
         let mut cursor = POINT { x: 0, y: 0 };
 
@@ -129,7 +147,9 @@ fn screen_center() -> std::io::Result<POINT> {
     // SAFETY: GetSystemMetrics has no pointer arguments and is safe to query repeatedly.
     let height = unsafe { GetSystemMetrics(SM_CYSCREEN) };
     if width <= 0 || height <= 0 {
-        return Err(std::io::Error::other("could not determine the display size"));
+        return Err(std::io::Error::other(
+            "could not determine the display size",
+        ));
     }
 
     Ok(POINT {
@@ -162,65 +182,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut last_debug_frame = Instant::now();
     let mut last_frame_start = Instant::now();
     let mut input = MovementInput::default();
-    let mouse_look = RelativeMouseLook::new()?;
-
-    // Cube definition
-    let vertices = [
-        Vec3::new(-1.0, -1.0, -1.0),
-        Vec3::new(1.0, -1.0, -1.0),
-        Vec3::new(1.0, 1.0, -1.0),
-        Vec3::new(-1.0, 1.0, -1.0),
-        Vec3::new(-1.0, -1.0, 1.0),
-        Vec3::new(1.0, -1.0, 1.0),
-        Vec3::new(1.0, 1.0, 1.0),
-        Vec3::new(-1.0, 1.0, 1.0),
-    ];
-
-    let triangles = [
-        Triangle {
-            vertices: [4, 5, 6],
-        },
-        Triangle {
-            vertices: [4, 6, 7],
-        },
-        Triangle {
-            vertices: [1, 0, 3],
-        },
-        Triangle {
-            vertices: [1, 3, 2],
-        },
-        Triangle {
-            vertices: [5, 1, 2],
-        },
-        Triangle {
-            vertices: [5, 2, 6],
-        },
-        Triangle {
-            vertices: [0, 4, 7],
-        },
-        Triangle {
-            vertices: [0, 7, 3],
-        },
-        Triangle {
-            vertices: [3, 7, 6],
-        },
-        Triangle {
-            vertices: [3, 6, 2],
-        },
-        Triangle {
-            vertices: [0, 1, 5],
-        },
-        Triangle {
-            vertices: [0, 5, 4],
-        },
-    ];
+    let mut mouse_look = RelativeMouseLook::new()?;
 
     let mut camera = Camera::new(
-        Vec3::new(0.0, 0.0, 5.0),
-        0.0, // yaw
-        0.0, // pitch
+        Vec3::new(0.5, 40.0, 5.0),
+        0.0,   // yaw
+        -0.35, // pitch: start looking slightly down at the terrain
         60.0f32.to_radians(),
     );
+    let mut world = World::new(0xA5C1_1A55_C11A_5511);
 
     while running {
         let frame_start = Instant::now();
@@ -232,13 +202,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // movement key stays active for its entire hold rather than one frame.
         while event::poll(Duration::from_millis(1))? {
             let ev = event::read()?;
-            if let Event::Key(key) = ev {
-                if key.code == KeyCode::Char('q') && key.kind == KeyEventKind::Press {
-                    writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
-                    running = false;
-                } else {
-                    input.update(key);
+            match ev {
+                Event::FocusGained => mouse_look.lock()?,
+                Event::FocusLost => {
+                    mouse_look.unlock();
+                    input.clear();
                 }
+                Event::Mouse(mouse_event)
+                    if matches!(mouse_event.kind, MouseEventKind::Down(_)) =>
+                {
+                    mouse_look.lock()?;
+                }
+                Event::Key(key) => {
+                    let unlock_requested = key.kind == KeyEventKind::Press
+                        && (key.code == KeyCode::Esc
+                            || (key.code == KeyCode::Char('c')
+                                && key.modifiers.contains(KeyModifiers::CONTROL)));
+
+                    if unlock_requested {
+                        mouse_look.unlock();
+                        input.clear();
+                    } else if key.code == KeyCode::Char('q') && key.kind == KeyEventKind::Press {
+                        writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
+                        running = false;
+                    } else {
+                        input.update(key);
+                    }
+                }
+                _ => {}
             }
         }
 
@@ -253,75 +244,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let move_vec = Vec3::mul_scalar(input.direction(&camera).normalize(), speed * delta_time);
         camera.position = Vec3::add(camera.position, move_vec);
 
-        // Keep the world geometry still; only the camera changes the view.
-        let model = Mat4::identity();
-
         let view = camera.get_view_matrix();
 
         let projection =
             Mat4::perspective(camera.fov, width as f32 / (height as f32 * 2.0), 0.1, 100.0);
 
-        let model_view = Mat4::multiply(view, model);
-        let mvp = Mat4::multiply(Mat4::multiply(projection, view), model);
+        let mvp = Mat4::multiply(projection, view);
         let light_dir = Vec3::new(-0.35, 0.65, 0.68).normalize();
+        let camera_chunk_x = (camera.position.x.floor() as i32).div_euclid(CHUNK_SIZE);
+        let camera_chunk_z = (camera.position.z.floor() as i32).div_euclid(CHUNK_SIZE);
+        world.ensure_render_distance(camera_chunk_x, camera_chunk_z);
 
-        // Project vertices
-        let mut projected_vertices = Vec::with_capacity(vertices.len());
-        let mut view_vertices = Vec::with_capacity(vertices.len());
-        let mut world_vertices = Vec::with_capacity(vertices.len());
-        let mut visible_vertices = 0;
-
-        for &vertex in &vertices {
-            let world = vec3_from_homogeneous(model.transform_vec(vertex));
-            let view_space = vec3_from_homogeneous(model_view.transform_vec(vertex));
-            let projected = project_vertex_with_depth(vertex, &mvp, width, height);
-
-            if projected.is_some() {
-                visible_vertices += 1;
-            }
-
-            world_vertices.push(world);
-            view_vertices.push(view_space);
-            projected_vertices.push(projected);
-        }
-
-        let mut culled_triangles = 0;
+        let mut visible_faces = 0;
         let mut rasterized_triangles = 0;
         let mut shaded_cells = 0;
-
-        for triangle in &triangles {
-            let [i0, i1, i2] = triangle.vertices;
-            let view_normal =
-                triangle_normal(view_vertices[i0], view_vertices[i1], view_vertices[i2]);
-
-            if Vec3::dot(view_normal, Vec3::new(0.0, 0.0, -1.0)) >= 0.0 {
-                culled_triangles += 1;
+        for face in world.visible_faces(camera_chunk_x, camera_chunk_z) {
+            let vertices = face.corners.map(|[x, y, z]| Vec3::new(x, y, z));
+            let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
+            if Vec3::dot(normal, Vec3::sub(camera.position, vertices[0])) <= 0.0 {
                 continue;
             }
-
-            let Some(p0) = projected_vertices[i0] else {
+            let projected =
+                vertices.map(|vertex| project_vertex_with_depth(vertex, &mvp, width, height));
+            let (Some(p0), Some(p1), Some(p2), Some(p3)) =
+                (projected[0], projected[1], projected[2], projected[3])
+            else {
                 continue;
             };
-            let Some(p1) = projected_vertices[i1] else {
-                continue;
-            };
-            let Some(p2) = projected_vertices[i2] else {
-                continue;
-            };
-
-            let world_normal =
-                triangle_normal(world_vertices[i0], world_vertices[i1], world_vertices[i2]);
-            let brightness = 0.18 + Vec3::dot(world_normal, light_dir).max(0.0) * 0.82;
-            let ch = shade_char(brightness);
-            let written = rasterize_triangle(&mut fb, p0, p1, p2, ch);
-
-            if written > 0 {
-                rasterized_triangles += 1;
-                shaded_cells += written;
+            visible_faces += 1;
+            let ch = block_shade(
+                face.block,
+                0.18 + Vec3::dot(normal, light_dir).max(0.0) * 0.82,
+            );
+            for (a, b, c) in [(p0, p1, p2), (p0, p2, p3)] {
+                let written = rasterize_triangle(&mut fb, a, b, c, ch);
+                if written > 0 {
+                    rasterized_triangles += 1;
+                    shaded_cells += written;
+                }
             }
         }
 
-        let status = "ASCII Minecraft | WASD move | Space up | C down | mouse look | q quits";
+        let status =
+            "ASCII Minecraft | WASD move | Space up | C down | Esc/Ctrl+C release mouse | q quits";
         for (x, ch) in status.chars().take(width).enumerate() {
             fb.set(x, height - 1, ch);
         }
@@ -329,12 +294,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if frame_count == 0 || last_debug_frame.elapsed() >= Duration::from_secs(1) {
             writeln!(
                 debug_log,
-                "[debug] frame={frame_count} position=({:.2}, {:.2}, {:.2}) visible_vertices={visible_vertices}/{} rasterized_triangles={rasterized_triangles}/{} shaded_cells={shaded_cells} culled_triangles={culled_triangles}",
-                camera.position.x,
-                camera.position.y,
-                camera.position.z,
-                vertices.len(),
-                triangles.len(),
+                "[debug] frame={frame_count} position=({:.2}, {:.2}, {:.2}) visible_faces={visible_faces} rasterized_triangles={rasterized_triangles} shaded_cells={shaded_cells}",
+                camera.position.x, camera.position.y, camera.position.z,
             )?;
             debug_log.flush()?;
             last_debug_frame = Instant::now();
@@ -358,14 +319,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn vec3_from_homogeneous(v: [f32; 4]) -> Vec3 {
-    if v[3].abs() > f32::EPSILON {
-        Vec3::new(v[0] / v[3], v[1] / v[3], v[2] / v[3])
-    } else {
-        Vec3::new(v[0], v[1], v[2])
-    }
-}
-
 fn triangle_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
     Vec3::cross(Vec3::sub(b, a), Vec3::sub(c, a)).normalize()
+}
+
+fn block_shade(block: Block, brightness: f32) -> char {
+    let material_brightness = match block {
+        Block::Grass => 1.0,
+        Block::Dirt => 0.72,
+        Block::Stone => 0.48,
+        Block::Air => 0.0,
+    };
+    shade_char(brightness * material_brightness)
 }

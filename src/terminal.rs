@@ -1,6 +1,7 @@
 use crate::framebuffer::Framebuffer;
 use crossterm::{
     ExecutableCommand, cursor, execute,
+    event::{DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
     terminal::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
@@ -12,7 +13,7 @@ pub struct TerminalGuard;
 impl TerminalGuard {
     pub fn new() -> Result<Self, std::io::Error> {
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, cursor::Hide)?;
+        execute!(stdout(), EnterAlternateScreen, cursor::Hide, EnableFocusChange, EnableMouseCapture)?;
         execute!(stdout(), terminal::Clear(terminal::ClearType::All))?;
         Ok(Self)
     }
@@ -21,7 +22,7 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut stdout = stdout();
-        let _ = execute!(stdout, cursor::Show, LeaveAlternateScreen);
+        let _ = execute!(stdout, cursor::Show, DisableFocusChange, DisableMouseCapture, LeaveAlternateScreen);
         let _ = disable_raw_mode();
     }
 }
