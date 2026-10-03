@@ -5,6 +5,7 @@ mod terminal;
 mod world;
 
 use framebuffer::Framebuffer;
+use framebuffer::TerminalColor;
 use terminal::{Terminal, TerminalGuard};
 
 use crossterm::event::{
@@ -272,12 +273,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 continue;
             };
             visible_faces += 1;
-            let ch = block_shade(
+            let (ch, color) = block_shade(
                 face.block,
                 0.18 + Vec3::dot(normal, light_dir).max(0.0) * 0.82,
             );
             for (a, b, c) in [(p0, p1, p2), (p0, p2, p3)] {
-                let written = rasterize_triangle(&mut fb, a, b, c, ch);
+                let written = rasterize_triangle(&mut fb, a, b, c, ch, color);
                 if written > 0 {
                     rasterized_triangles += 1;
                     shaded_cells += written;
@@ -323,12 +324,12 @@ fn triangle_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
     Vec3::cross(Vec3::sub(b, a), Vec3::sub(c, a)).normalize()
 }
 
-fn block_shade(block: Block, brightness: f32) -> char {
-    let material_brightness = match block {
-        Block::Grass => 1.0,
-        Block::Dirt => 0.72,
-        Block::Stone => 0.48,
-        Block::Air => 0.0,
+fn block_shade(block: Block, brightness: f32) -> (char, TerminalColor) {
+    let (material_brightness, color) = match block {
+        Block::Grass => (1.0, TerminalColor::Green),
+        Block::Dirt => (0.72, TerminalColor::Yellow),
+        Block::Stone => (0.48, TerminalColor::Grey),
+        Block::Air => (0.0, TerminalColor::Grey),
     };
-    shade_char(brightness * material_brightness)
+    (shade_char(brightness * material_brightness), color)
 }

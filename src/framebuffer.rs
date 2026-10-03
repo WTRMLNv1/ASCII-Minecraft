@@ -1,7 +1,15 @@
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TerminalColor {
+    Grey,
+    Green,
+    Yellow,
+}
+
 pub struct Framebuffer {
     pub width: usize,
     pub height: usize,
     pub cells: Vec<char>,
+    pub colors: Vec<TerminalColor>,
     pub depth: Vec<f32>,
 }
 
@@ -11,6 +19,7 @@ impl Framebuffer {
             width,
             height,
             cells: vec![' '; width * height],
+            colors: vec![TerminalColor::Grey; width * height],
             depth: vec![f32::INFINITY; width * height],
         }
     }
@@ -30,7 +39,14 @@ impl Framebuffer {
         }
     }
 
-    pub fn set_with_depth(&mut self, x: usize, y: usize, depth: f32, ch: char) -> bool {
+    pub fn set_with_depth(
+        &mut self,
+        x: usize,
+        y: usize,
+        depth: f32,
+        ch: char,
+        color: TerminalColor,
+    ) -> bool {
         if x >= self.width || y >= self.height {
             return false;
         }
@@ -39,6 +55,7 @@ impl Framebuffer {
         if depth < self.depth[idx] {
             self.depth[idx] = depth;
             self.cells[idx] = ch;
+            self.colors[idx] = color;
             return true;
         }
 

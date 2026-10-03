@@ -1,4 +1,4 @@
-use crate::framebuffer::Framebuffer;
+use crate::framebuffer::{Framebuffer, TerminalColor};
 use crate::math::vec::Vec3;
 
 #[derive(Debug, Clone, Copy)]
@@ -83,6 +83,7 @@ pub fn rasterize_triangle(
     b: ScreenVertex,
     c: ScreenVertex,
     ch: char,
+    color: TerminalColor,
 ) -> usize {
     let min_x = a.x.min(b.x).min(c.x).floor().max(0.0) as i32;
     let max_x = a.x.max(b.x).max(c.x).ceil().min((fb.width - 1) as f32) as i32;
@@ -116,7 +117,7 @@ pub fn rasterize_triangle(
                 let gamma = w2 / area;
                 let depth = alpha * a.depth + beta * b.depth + gamma * c.depth;
 
-                if fb.set_with_depth(x as usize, y as usize, depth, ch) {
+                if fb.set_with_depth(x as usize, y as usize, depth, ch, color) {
                     written += 1;
                 }
             }

@@ -1,7 +1,9 @@
-use crate::framebuffer::Framebuffer;
+use crate::framebuffer::{Framebuffer, TerminalColor};
 use crossterm::{
-    ExecutableCommand, cursor, execute,
+    ExecutableCommand, cursor,
     event::{DisableFocusChange, DisableMouseCapture, EnableFocusChange, EnableMouseCapture},
+    execute,
+    style::{Color, ResetColor, SetBackgroundColor, SetForegroundColor},
     terminal::{
         self, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
     },
@@ -13,7 +15,15 @@ pub struct TerminalGuard;
 impl TerminalGuard {
     pub fn new() -> Result<Self, std::io::Error> {
         enable_raw_mode()?;
-        execute!(stdout(), EnterAlternateScreen, cursor::Hide, EnableFocusChange, EnableMouseCapture)?;
+        execute!(
+            stdout(),
+            EnterAlternateScreen,
+            cursor::Hide,
+            SetBackgroundColor(Color::Black),
+            SetForegroundColor(Color::Grey),
+            EnableFocusChange,
+            EnableMouseCapture
+        )?;
         execute!(stdout(), terminal::Clear(terminal::ClearType::All))?;
         Ok(Self)
     }
@@ -22,7 +32,14 @@ impl TerminalGuard {
 impl Drop for TerminalGuard {
     fn drop(&mut self) {
         let mut stdout = stdout();
-        let _ = execute!(stdout, cursor::Show, DisableFocusChange, DisableMouseCapture, LeaveAlternateScreen);
+        let _ = execute!(
+            stdout,
+            cursor::Show,
+            ResetColor,
+            DisableFocusChange,
+            DisableMouseCapture,
+            LeaveAlternateScreen
+        );
         let _ = disable_raw_mode();
     }
 }
@@ -30,6 +47,8 @@ impl Drop for TerminalGuard {
 pub struct Terminal {
     stdout: BufWriter<std::io::Stdout>,
     previous_frame: Vec<char>,
+    previous_colors: Vec<TerminalColor>,
+    active_color: TerminalColor,
 }
 
 impl Terminal {
@@ -37,6 +56,8 @@ impl Terminal {
         Ok(Self {
             stdout: BufWriter::new(stdout()),
             previous_frame: vec![' '; width * height],
+            previous_colors: vec![TerminalColor::Grey; width * height],
+            active_color: TerminalColor::Grey,
         })
     }
 
@@ -46,14 +67,31 @@ impl Terminal {
                 let idx = y * fb.width + x;
                 let current_char = fb.cells[idx];
 
-                if current_char != self.previous_frame[idx] {
+                let current_color = fb.colors[idx];
+                if current_char != self.previous_frame[idx]
+                    || current_color != self.previous_colors[idx]
+                {
                     self.stdout.execute(cursor::MoveTo(x as u16, y as u16))?;
+                    if current_color != self.active_color {
+                        self.stdout
+                            .execute(SetForegroundColor(color_to_crossterm(current_color)))?;
+                        self.active_color = current_color;
+                    }
                     write!(self.stdout, "{}", current_char)?;
                     self.previous_frame[idx] = current_char;
+                    self.previous_colors[idx] = current_color;
                 }
             }
         }
         self.stdout.flush()?;
         Ok(())
+    }
+}
+
+fn color_to_crossterm(color: TerminalColor) -> Color {
+    match color {
+        TerminalColor::Grey => Color::Grey,
+        TerminalColor::Green => Color::Green,
+        TerminalColor::Yellow => Color::Yellow,
     }
 }
