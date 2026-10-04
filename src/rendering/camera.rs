@@ -47,12 +47,15 @@ impl Camera {
     }
 
     pub fn get_view_matrix(&self) -> Mat4 {
+        self.get_view_matrix_at(self.position)
+    }
+
+    pub fn get_view_matrix_at(&self, position: Vec3) -> Mat4 {
         let forward = self.get_forward();
         let right = self.get_right();
         let up = self.get_up();
 
         let mut m = Mat4::identity();
-
 
         // Orientation part
         m.data[0] = right.x;
@@ -68,10 +71,9 @@ impl Camera {
         m.data[10] = -forward.z;
 
         // Translation part
-        let pos = self.position;
-        m.data[3] = -Vec3::dot(right, pos);
-        m.data[7] = -Vec3::dot(up, pos);
-        m.data[11] = Vec3::dot(forward, pos);
+        m.data[3] = -Vec3::dot(right, position);
+        m.data[7] = -Vec3::dot(up, position);
+        m.data[11] = Vec3::dot(forward, position);
 
         m
     }

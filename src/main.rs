@@ -60,16 +60,20 @@ impl MovementInput {
         let mut direction = Vec3::new(0.0, 0.0, 0.0);
 
         if self.forward {
-            direction = Vec3::add(direction, camera.get_forward());
+            let fwd = camera.get_forward();
+            direction = Vec3::add(direction, Vec3::new(fwd.x, 0.0, fwd.z));
         }
         if self.backward {
-            direction = Vec3::sub(direction, camera.get_forward());
+            let fwd = camera.get_forward();
+            direction = Vec3::sub(direction, Vec3::new(fwd.x, 0.0, fwd.z));
         }
         if self.left {
-            direction = Vec3::sub(direction, camera.get_right());
+            let right = camera.get_right();
+            direction = Vec3::sub(direction, Vec3::new(right.x, 0.0, right.z));
         }
         if self.right {
-            direction = Vec3::add(direction, camera.get_right());
+            let right = camera.get_right();
+            direction = Vec3::add(direction, Vec3::new(right.x, 0.0, right.z));
         }
         if self.up {
             direction = Vec3::add(direction, Vec3::new(0.0, 1.0, 0.0));
@@ -239,13 +243,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // 2. Update
         fb.clear();
 
-        // Update camera position. Space rises; Shift descends. Collision is
-        // intentionally absent, so the camera can move freely through the scene.
+        // Update camera position. Space rises; Shift descends.
         let speed = 5.0;
         let move_vec = Vec3::mul_scalar(input.direction(&camera).normalize(), speed * delta_time);
-        camera.position = Vec3::add(camera.position, move_vec);
 
-        let view = camera.get_view_matrix();
+        let next_position = Vec3::add(camera.position, move_vec);
+
+        // AABB Collision Detection
+        // Player hitbox: 1x1x2 (width x height x depth)
+        // We check the corners of the hitbox at the next position.
+        let mut collided = false;
+        let hitbox_width = 0.6; // Slightly smaller than 1.0 to prevent getting stuck in walls
+        let hitbox_depth = 0.6;
+        let hitbox_height = 2.0;
+
+        let offsets = [
+            (0.0, 0.0),
+            (hitbox_width, 0.0),
+            (0.0, hitbox_depth),
+            (hitbox_width, hitbox_depth),
+        ];
+
+        for (ox, oz) in offsets {
+            let check_x = next_position.x + ox;
+            let check_z = next_position.z + oz;
+
+            // Check feet and head
+            for py in [0.0, hitbox_height - 0.1] {
+                let world_x = check_x.floor() as i32;
+                let world_y = (next_position.y + py).floor() as i32;
+                let world_z = check_z.floor() as i32;
+
+                if world.get_block(world_x, world_y, world_z) != Block::Air {
+                    collided = true;
+                    break;
+                }
+            }
+            if collided { break; }
+        }
+
+        if !collided {
+            camera.position = next_position;
+        }
+
+        // Offset the render camera to the "eyes" of the player.
+        // Hitbox is 1x1x2. Camera is centered in width (0.5)
+        // and 75% of the way up the height (2.0 * 0.75 = 1.5).
+        // We use a temporary view matrix offset or simply shift the camera position
+        // for the view calculation.
+        let eye_position = Vec3::new(
+            camera.position.x + 0.5,
+            camera.position.y + 1.5,
+            camera.position.z + 0.5,
+        );
+        let view = camera.get_view_matrix_at(eye_position);
 
         let projection =
             Mat4::perspective(camera.fov, width as f32 / (height as f32 * 2.0), 0.1, 100.0);
@@ -262,7 +313,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         for face in world.visible_faces(camera_chunk_x, camera_chunk_z) {
             let vertices = face.corners.map(|[x, y, z]| Vec3::new(x, y, z));
             let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
-            if Vec3::dot(normal, Vec3::sub(camera.position, vertices[0])) <= 0.0 {
+            if Vec3::dot(normal, Vec3::sub(eye_position, vertices[0])) <= 0.0 {
                 continue;
             }
             let projected =

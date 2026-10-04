@@ -67,6 +67,29 @@ impl World {
             .flatten()
     }
 
+    pub fn get_block(&self, x: i32, y: i32, z: i32) -> Block {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return Block::Air;
+        }
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let lx = x.rem_euclid(CHUNK_SIZE);
+        let lz = z.rem_euclid(CHUNK_SIZE);
+
+        self.chunks
+            .get(&(cx, cz))
+            .map(|chunk| chunk.blocks[block_index(lx, y, lz)])
+            .unwrap_or_else(|| {
+                let h = self.surface_height(x, z);
+                if y <= h {
+                    block_at_height(h, y)
+                } else {
+                    Block::Air
+                }
+            })
+    }
+
+
     fn generate_chunk(&self, chunk_x: i32, chunk_z: i32) -> Chunk {
         let mut blocks = vec![Block::Air; (CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) as usize];
         let mut heights = [[0_i32; CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
