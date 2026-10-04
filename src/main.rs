@@ -499,45 +499,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             GameState::Playing { world, camera, input, mouse_look } => {
                 mouse_look.update_camera(camera)?;
 
-                // Update camera position. Space rises; Shift descends.
                 let speed = 5.0;
                 let move_vec = Vec3::mul_scalar(input.direction(camera).normalize(), speed * delta_time);
 
-                let next_position = Vec3::add(camera.position, move_vec);
-
-                // AABB Collision Detection
-                let mut collided = false;
                 let hitbox_width = 0.6;
                 let hitbox_depth = 0.6;
                 let hitbox_height = 2.0;
 
-                let offsets = [
-                    (0.0, 0.0),
-                    (hitbox_width, 0.0),
-                    (0.0, hitbox_depth),
-                    (hitbox_width, hitbox_depth),
-                ];
+                let mut next_position = camera.position;
 
-                for (ox, oz) in offsets {
-                    let check_x = next_position.x + ox;
-                    let check_z = next_position.z + oz;
-
+                // Resolve X-axis movement
+                let next_pos_x = Vec3::add(camera.position, Vec3::new(move_vec.x, 0.0, 0.0));
+                let mut collided_x = false;
+                let x_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                for (ox, oz) in x_offsets {
                     for py in [0.0, hitbox_height - 0.1] {
-                        let world_x = check_x.floor() as i32;
-                        let world_y = (next_position.y + py).floor() as i32;
-                        let world_z = check_z.floor() as i32;
-
+                        let world_x = (next_pos_x.x + ox).floor() as i32;
+                        let world_y = (next_pos_x.y + py).floor() as i32;
+                        let world_z = (next_pos_x.z + oz).floor() as i32;
                         if world.get_block(world_x, world_y, world_z) != Block::Air {
-                            collided = true;
+                            collided_x = true;
                             break;
                         }
                     }
-                    if collided { break; }
+                    if collided_x { break; }
+                }
+                if !collided_x {
+                    next_position.x = next_pos_x.x;
                 }
 
-                if !collided {
-                    camera.position = next_position;
+                // Resolve Z-axis movement
+                let next_pos_z = Vec3::add(next_position, Vec3::new(0.0, 0.0, move_vec.z));
+                let mut collided_z = false;
+                let z_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                for (ox, oz) in z_offsets {
+                    for py in [0.0, hitbox_height - 0.1] {
+                        let world_x = (next_pos_z.x + ox).floor() as i32;
+                        let world_y = (next_pos_z.y + py).floor() as i32;
+                        let world_z = (next_pos_z.z + oz).floor() as i32;
+                        if world.get_block(world_x, world_y, world_z) != Block::Air {
+                            collided_z = true;
+                            break;
+                        }
+                    }
+                    if collided_z { break; }
                 }
+                if !collided_z {
+                    next_position.z = next_pos_z.z;
+                }
+
+                // Resolve Y-axis movement
+                let next_pos_y = Vec3::add(next_position, Vec3::new(0.0, move_vec.y, 0.0));
+                let mut collided_y = false;
+                let y_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                for (ox, oz) in y_offsets {
+                    for py in [0.0, hitbox_height - 0.1] {
+                        let world_x = (next_pos_y.x + ox).floor() as i32;
+                        let world_y = (next_pos_y.y + py).floor() as i32;
+                        let world_z = (next_pos_y.z + oz).floor() as i32;
+                        if world.get_block(world_x, world_y, world_z) != Block::Air {
+                            collided_y = true;
+                            break;
+                        }
+                    }
+                    if collided_y { break; }
+                }
+                if !collided_y {
+                    next_position.y = next_pos_y.y;
+                }
+
+                camera.position = next_position;
 
                 let eye_position = Vec3::new(
                     camera.position.x + 0.5,
