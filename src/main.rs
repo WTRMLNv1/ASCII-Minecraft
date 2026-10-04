@@ -217,6 +217,7 @@ fn render_start_screen(
 
     // Large block/ASCII "AsciiMLN" logo.
     // Each character is 5 columns wide, with a single-column gap.
+    // Large block/ASCII "AsciiMLN" logo.
     const LOGO: [&str; 6] = [
         " █████╗ ███████╗ ██████╗██╗██╗   ███╗   ███╗██╗     ███╗   ██╗",
         "██╔══██╗██╔════╝██╔════╝██║██║   ████╗ ████║██║     ████╗  ██║",
@@ -225,10 +226,25 @@ fn render_start_screen(
         "██║  ██║███████║╚██████╗██║██║   ██║ ╚═╝ ██║███████╗██║ ╚████║",
         "╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝╚═╝   ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝",
     ];
+    let subtitle = "TERMINAL WORLD ENGINE";
 
+    const BOX_WIDTH: usize = 46;
+    const BOX_HEIGHT: usize = 3;
+    let items = ["PLAY", "WORLD SEED", "QUIT"];
+    // Total height of just the stacked boxes, no trailing gap after the last one.
+    let menu_block_height = items.len() * BOX_HEIGHT + (items.len() - 1);
+
+    // Gaps between the sections, in rows.
+    let gap_logo_subtitle = 1;
+    let gap_subtitle_menu = 2;
+
+    let content_height = LOGO.len() + gap_logo_subtitle + 1 /*subtitle*/ + gap_subtitle_menu + menu_block_height;
+    let content_start_y = (height.saturating_sub(content_height)) / 2;
+
+    // --- Logo ---
     let logo_width = LOGO.iter().map(|line| line.chars().count()).max().unwrap_or(0);
     let logo_x = width.saturating_sub(logo_width) / 2;
-    let logo_y = (height.saturating_sub(LOGO.len())) / 2;
+    let logo_y = content_start_y;
 
     for (row, line) in LOGO.iter().enumerate() {
         for (col, ch) in line.chars().enumerate() {
@@ -238,25 +254,21 @@ fn render_start_screen(
         }
     }
 
-    // Subtitle / divider.
-    let subtitle = "TERMINAL WORLD ENGINE";
+    // --- Subtitle ---
     let sx = width.saturating_sub(subtitle.len()) / 2;
-    let sy = logo_y + LOGO.len() + 1;
+    let sy = logo_y + LOGO.len() + gap_logo_subtitle;
     for (i, ch) in subtitle.chars().enumerate() {
         if sx + i < width && sy < height {
             fb.set(sx + i, sy, ch);
         }
     }
 
-    // Large menu controls.
-    const BOX_WIDTH: usize = 46;
-    const BOX_HEIGHT: usize = 3;
-    let items = ["PLAY", "WORLD SEED", "QUIT"];
+    // --- Menu ---
     let menu_x = width.saturating_sub(BOX_WIDTH) / 2;
-    let menu_y = (height.saturating_sub(items.len() * (BOX_HEIGHT + 1) + BOX_HEIGHT)) / 2;
+    let menu_y = sy + 1 + gap_subtitle_menu;
 
     for (i, item) in items.iter().enumerate() {
-        let y = menu_y + i * (BOX_HEIGHT + 1);
+        let y = menu_y + i * BOX_HEIGHT; // boxes are flush-stacked, no per-item gap
         if y + BOX_HEIGHT > height.saturating_sub(3) {
             continue;
         }
