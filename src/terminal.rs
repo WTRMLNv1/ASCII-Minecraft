@@ -61,28 +61,41 @@ impl Terminal {
         })
     }
 
-    pub fn present(&mut self, fb: &Framebuffer) -> Result<(), std::io::Error> {
+    pub fn resize(&mut self, width: usize, height: usize) {
+        self.previous_frame = vec![' '; width * height];
+        self.previous_colors = vec![TerminalColor::Grey; width * height];
+    }
+
+    pub fn render(&mut self, fb: &Framebuffer) -> Result<(), std::io::Error> {
         for y in 0..fb.height {
             for x in 0..fb.width {
                 let idx = y * fb.width + x;
                 let current_char = fb.cells[idx];
-
                 let current_color = fb.colors[idx];
+
                 if current_char != self.previous_frame[idx]
                     || current_color != self.previous_colors[idx]
                 {
-                    self.stdout.execute(cursor::MoveTo(x as u16, y as u16))?;
+                    self.stdout
+                        .execute(cursor::MoveTo(x as u16, y as u16))?;
+
                     if current_color != self.active_color {
                         self.stdout
-                            .execute(SetForegroundColor(color_to_crossterm(current_color)))?;
+                            .execute(SetForegroundColor(
+                                color_to_crossterm(current_color)
+                            ))?;
+
                         self.active_color = current_color;
                     }
+
                     write!(self.stdout, "{}", current_char)?;
+
                     self.previous_frame[idx] = current_char;
                     self.previous_colors[idx] = current_color;
                 }
             }
         }
+
         self.stdout.flush()?;
         Ok(())
     }

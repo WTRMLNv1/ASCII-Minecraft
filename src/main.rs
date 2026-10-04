@@ -355,8 +355,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let guard = TerminalGuard::new()?;
 
-    let width = 240;
-    let height = 80;
+    let (width, height) = crossterm::terminal::size()
+        .map(|(w, h)| (w as usize, h as usize))
+        .unwrap_or((240, 80));
+
+    let mut width = width;
+    let mut height = height;
 
     let mut terminal = Terminal::new(width, height)?;
     let mut fb = Framebuffer::new(width, height);
@@ -476,6 +480,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         mouse_look.lock()?;
                     }
                 }
+                Event::Resize(new_w, new_h) => {
+                    width = new_w as usize;
+                    height = new_h as usize;
+                    fb = Framebuffer::new(width, height);
+                    terminal.resize(width, height);
+                }
                 _ => {}
             }
         }
@@ -593,7 +603,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        terminal.present(&fb)?;
+        terminal.render(&fb)?;
         frame_count += 1;
 
         let frame_elapsed = frame_start.elapsed();
