@@ -192,74 +192,144 @@ fn hash_seed(text: &str) -> u64 {
     hash
 }
 
-fn render_start_screen(fb: &mut Framebuffer, selected_index: usize, seed_text: &str, cursor_pos: usize) {
+fn render_start_screen(
+    fb: &mut Framebuffer,
+    selected_index: usize,
+    seed_text: &str,
+    cursor_pos: usize,
+) {
     let width = fb.width;
     let height = fb.height;
 
-    // Border
-    let bw = 60;
-    let bh = 20;
-    let bx = (width - bw) / 2;
-    let by = (height - bh) / 2;
-
-    for x in bx..bx + bw {
-        fb.set(x, by, '═');
-        fb.set(x, by + bh - 1, '═');
-    }
-    for y in by + 1..by + bh - 1 {
-        fb.set(bx, y, '║');
-        fb.set(bx + bw - 1, y, '║');
-    }
-    fb.set(bx, by, '╔');
-    fb.set(bx + bw - 1, by, '╗');
-    fb.set(bx, by + bh - 1, '╚');
-    fb.set(bx + bw - 1, by + bh - 1, '╝');
-
-    // Title
-    let title = [
-        " ███  ████  ████  ███  ███  ███  ███ ",
-        " ███  █   █ █   █ ███  ███  ███  ███ ",
-        " ███  ████  ████  ███  ███  ███  ███ ",
-    ];
-    let tx = (width - title[0].len()) / 2;
-    let ty = by + 2;
-    for (i, line) in title.iter().enumerate() {
-        for (j, ch) in line.chars().enumerate() {
-            fb.set(tx + j, ty + i, ch);
+    // Fill the entire terminal with a subtle framed title screen.
+    for y in 0..height {
+        for x in 0..width {
+            let ch = if y == 0 || y == height - 1 || x == 0 || x == width - 1 {
+                '#'
+            } else if y == 1 || y == height - 2 || x == 1 || x == width - 2 {
+                '.'
+            } else {
+                ' '
+            };
+            fb.set(x, y, ch);
         }
     }
 
-    // Menu Items
+    // Large block/ASCII "AsciiMLN" logo.
+    // Each character is 5 columns wide, with a single-column gap.
+    const LOGO: [&str; 6] = [
+        " █████╗ ███████╗ ██████╗██╗██╗   ███╗   ███╗██╗     ███╗   ██╗",
+        "██╔══██╗██╔════╝██╔════╝██║██║   ████╗ ████║██║     ████╗  ██║",
+        "███████║███████╗██║     ██║██║   ██╔████╔██║██║     ██╔██╗ ██║",
+        "██╔══██║╚════██║██║     ██║██║   ██║╚██╔╝██║██║     ██║╚██╗██║",
+        "██║  ██║███████║╚██████╗██║██║   ██║ ╚═╝ ██║███████╗██║ ╚████║",
+        "╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝╚═╝   ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝",
+    ];
+
+    let logo_width = LOGO.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    let logo_x = width.saturating_sub(logo_width) / 2;
+    let logo_y = (height.saturating_sub(LOGO.len())) / 2;
+
+    for (row, line) in LOGO.iter().enumerate() {
+        for (col, ch) in line.chars().enumerate() {
+            if logo_x + col < width && logo_y + row < height {
+                fb.set(logo_x + col, logo_y + row, ch);
+            }
+        }
+    }
+
+    // Subtitle / divider.
+    let subtitle = "TERMINAL WORLD ENGINE";
+    let sx = width.saturating_sub(subtitle.len()) / 2;
+    let sy = logo_y + LOGO.len() + 1;
+    for (i, ch) in subtitle.chars().enumerate() {
+        if sx + i < width && sy < height {
+            fb.set(sx + i, sy, ch);
+        }
+    }
+
+    // Large menu controls.
+    const BOX_WIDTH: usize = 46;
+    const BOX_HEIGHT: usize = 3;
     let items = ["PLAY", "WORLD SEED", "QUIT"];
-    let item_y_start = by + 8;
+    let menu_x = width.saturating_sub(BOX_WIDTH) / 2;
+    let menu_y = (height.saturating_sub(items.len() * (BOX_HEIGHT + 1) + BOX_HEIGHT)) / 2;
+
     for (i, item) in items.iter().enumerate() {
-        let y = item_y_start + i * 3;
-        let is_selected = i == selected_index;
+        let y = menu_y + i * (BOX_HEIGHT + 1);
+        if y + BOX_HEIGHT > height.saturating_sub(3) {
+            continue;
+        }
+
+        let selected = i == selected_index;
+
+        // Box.
+        let left = if selected { '>' } else { '|' };
+        let right = if selected { '<' } else { '|' };
+
+        for x in 0..BOX_WIDTH {
+            let ch = if x == 0 {
+                '╔'
+            } else if x == BOX_WIDTH - 1 {
+                '╗'
+            } else {
+                '═'
+            };
+            fb.set(menu_x + x, y, ch);
+
+            let bottom = if x == 0 {
+                '╚'
+            } else if x == BOX_WIDTH - 1 {
+                '╝'
+            } else {
+                '═'
+            };
+            fb.set(menu_x + x, y + BOX_HEIGHT - 1, bottom);
+        }
+
+        for yy in 1..BOX_HEIGHT - 1 {
+            fb.set(menu_x, y + yy, '║');
+            fb.set(menu_x + BOX_WIDTH - 1, y + yy, '║');
+        }
 
         let label = if i == 1 {
-            format!("WORLD SEED: {} ", seed_text)
+            format!("WORLD SEED: {}", seed_text)
         } else {
-            format!("  {}  ", item)
+            (*item).to_string()
         };
 
-        let lx = (width - label.len()) / 2;
-
-        // Highlighting
-        if is_selected {
-            fb.set(lx - 1, y, '[');
-            fb.set(lx + label.len(), y, ']');
-        }
+        let label_width = label.chars().count();
+        let label_x = menu_x + (BOX_WIDTH.saturating_sub(label_width)) / 2;
 
         for (j, ch) in label.chars().enumerate() {
-            fb.set(lx + j, y, ch);
+            if label_x + j < menu_x + BOX_WIDTH - 1 {
+                fb.set(label_x + j, y + 1, ch);
+            }
         }
 
-        // Seed cursor
-        if i == 1 {
-            let cursor_x = lx + 12 + cursor_pos;
-            if cursor_x < width {
-                fb.set(cursor_x, y, '_');
+        // Selection arrows make the active control much more obvious.
+        if selected {
+            fb.set(menu_x + 2, y + 1, left);
+            fb.set(menu_x + BOX_WIDTH - 3, y + 1, right);
+        }
+
+        // Seed cursor.
+        if i == 1 && selected {
+            let prefix_width = "WORLD SEED: ".chars().count();
+            let cursor_x = label_x + prefix_width + cursor_pos;
+            if cursor_x < menu_x + BOX_WIDTH - 2 {
+                fb.set(cursor_x, y + 1, '_');
             }
+        }
+    }
+
+    // Controls hint.
+    let hint = "↑ / ↓  SELECT     ENTER  CONFIRM     Q  QUIT";
+    let hx = width.saturating_sub(hint.len()) / 2;
+    let hy = height.saturating_sub(3);
+    for (i, ch) in hint.chars().enumerate() {
+        if hx + i < width {
+            fb.set(hx + i, hy, ch);
         }
     }
 }
