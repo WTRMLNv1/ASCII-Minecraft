@@ -464,27 +464,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             } else if key.code == KeyCode::Char('q') && key.kind == KeyEventKind::Press {
                                 writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
                                 running = false;
-                            } else if key.code == KeyCode::Char(' ') && key.kind == KeyEventKind::Press {
-                                let now = Instant::now();
-                                if let Some(last_press) = *last_space_press {
-                                    if now.duration_since(last_press).as_millis() < 300 {
-                                        *is_flying = !*is_flying;
-                                        *velocity_y = 0.0;
-                                        *last_space_press = None;
+                            } else if key.code == KeyCode::Char(' ') {
+                                // Windows sends repeated Press events while a key is held.  Only the
+                                // transition from released to pressed is a tap; repeats must not count
+                                // toward the double-tap flight toggle.
+                                let is_new_space_press = key.kind == KeyEventKind::Press && !input.up;
+
+                                if is_new_space_press {
+                                    let now = Instant::now();
+                                    if let Some(last_press) = *last_space_press {
+                                        if now.duration_since(last_press).as_millis() < 300 {
+                                            *is_flying = !*is_flying;
+                                            *velocity_y = 0.0;
+                                            *last_space_press = None;
+                                        } else {
+                                            *last_space_press = Some(now);
+                                            if !*is_flying && *is_grounded {
+                                                *velocity_y = 7.75;
+                                            }
+                                        }
                                     } else {
                                         *last_space_press = Some(now);
                                         if !*is_flying && *is_grounded {
                                             *velocity_y = 7.75;
                                         }
                                     }
-                                } else {
-                                    *last_space_press = Some(now);
-                                    if !*is_flying && *is_grounded {
-                                        *velocity_y = 7.75;
-                                    }
                                 }
-                                // IMPORTANT: We must still update the MovementInput for the flight case
-                                // because the double-tap logic above consumes the event.
+
                                 input.update(key);
                             } else if key.kind == KeyEventKind::Press {
                                 input.update(key);
@@ -560,7 +566,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let hitbox_width = 0.6;
                 let hitbox_depth = 0.6;
                 let hitbox_height = 2.0;
-                let ground_y = (camera.position.y).floor() as i32;
+                // `camera.position` is the bottom of the player's hitbox.  Check the
+                // block immediately below it, not the (normally empty) feet cell.
+                let ground_y = (camera.position.y - 0.05).floor() as i32;
 
                 let ground_offsets = [
                     (0.0, 0.0),
@@ -704,7 +712,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
 
                 let status =
-                    "ASCII Minecraft | WASD move | Space up | C down | Esc/Ctrl+C release mouse | q quits";
+                    "ASCII Minecraft | WASD move | Space jump/up | double Space fly | C down | Esc/Ctrl+C release mouse | q quits";
                 for (x, ch) in status.chars().take(width).enumerate() {
                     fb.set(x, height - 1, ch);
                 }
