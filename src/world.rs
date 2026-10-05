@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use noise::{NoiseFn, Fbm, Perlin};
+use noise::{NoiseFn, Fbm, Perlin, MultiFractal};
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const WORLD_HEIGHT: i32 = 64;
@@ -29,19 +29,23 @@ pub struct Chunk {
 pub struct World {
     seed: u64,
     chunks: HashMap<(i32, i32), Chunk>,
-    terrain_noise: Fbm<Perlin>,
-    direction_noise: Perlin,
-    scale: f64,
+    base_noise: Fbm<Perlin>,
+    mask_noise: Perlin,
+    mountain_noise: Fbm<Perlin>,
 }
 
 impl World {
     pub fn new(seed: u64) -> Self {
+        let seed_u32 = seed as u32;
         Self {
             seed,
             chunks: HashMap::new(),
-            terrain_noise: Fbm::<Perlin>::new(seed as u32),
-            direction_noise: Perlin::new(seed as u32),
-            scale: 0.05,
+            base_noise: Fbm::<Perlin>::new(seed_u32)
+                .set_octaves(3)
+                .set_persistence(0.5)
+                .set_lacunarity(2.0),
+            mask_noise: Perlin::new(seed_u32.wrapping_add(1)),
+            mountain_noise: Fbm::<Perlin>::new(seed_u32.wrapping_add(2)),
         }
     }
 
@@ -275,25 +279,32 @@ impl World {
     }
 
     fn surface_height(&self, x: i32, z: i32) -> i32 {
-        let n = self.terrain_noise.get([x as f64 * self.scale, z as f64 * self.scale]);
-        let roll = (n + 1.0) / 2.0;
+        let x_f = x as f64;
+        let z_f = z as f64;
 
-        let magnitude = if roll < 0.20 {
-            0
-        } else if roll < 0.80 {
-            1
-        } else if roll < 0.90 {
-            2
-        } else {
-            5
-        };
+        // Layer 1: Base rolling terrain
+        let base_val = self.base_noise.get([x_f * 0.01, z_f * 0.01]);
+        let base_h = base_val * 6.0;
 
-        let dir_n = self.direction_noise.get([x as f64 * self.scale, z as f64 * self.scale]);
-        let sign = if dir_n >= 0.0 { 1 } else { -1 };
+        // Layer 2: Mountain mask
+        let mask_val_raw = self.mask_noise.get([x_f * 0.003, z_f * 0.003]);
+        let mask_normalized = (mask_val_raw + 1.0) / 2.0;
+        let mask = smoothstep(0.5, 1.0, mask_normalized);
 
-        (32 + (magnitude * sign))
+        // Layer 3: Mountain height
+        let mt_val = self.mountain_noise.get([x_f * 0.02, z_f * 0.02]);
+        let mt_h = mt_val * 25.0;
+
+        let final_h = 32.0 + base_h + (mask * mt_h);
+
+        (final_h.round() as i32)
             .clamp(1, WORLD_HEIGHT - 2)
     }
+}
+
+fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 fn block_index(x: i32, y: i32, z: i32) -> usize {
