@@ -55,7 +55,7 @@ impl MovementInput {
         }
     }
 
-    fn direction(&self, camera: &Camera) -> Vec3 {
+    fn direction(&self, camera: &Camera, is_flying: bool) -> Vec3 {
         let mut direction = Vec3::new(0.0, 0.0, 0.0);
 
         if self.forward {
@@ -74,10 +74,10 @@ impl MovementInput {
             let right = camera.get_right();
             direction = Vec3::add(direction, Vec3::new(right.x, 0.0, right.z));
         }
-        if self.up {
+        if is_flying && self.up {
             direction = Vec3::add(direction, Vec3::new(0.0, 1.0, 0.0));
         }
-        if self.down {
+        if is_flying && self.down {
             direction = Vec3::sub(direction, Vec3::new(0.0, 1.0, 0.0));
         }
 
@@ -173,6 +173,10 @@ enum GameState {
         camera: Camera,
         input: MovementInput,
         mouse_look: RelativeMouseLook,
+        is_flying: bool,
+        velocity_y: f32,
+        last_space_press: Option<Instant>,
+        is_grounded: bool,
     },
 }
 
@@ -414,6 +418,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                                 ),
                                                 input: MovementInput::default(),
                                                 mouse_look,
+                                                is_flying: true,
+                                                velocity_y: 0.0,
+                                                last_space_press: None,
+                                                is_grounded: false,
                                             };
                                         } else if *selected_index == 2 {
                                             running = false;
@@ -444,7 +452,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        GameState::Playing { input, mouse_look, .. } => {
+                        GameState::Playing { world, camera, input, mouse_look, is_flying, velocity_y, last_space_press, is_grounded } => {
                             let unlock_requested = key.kind == KeyEventKind::Press
                                 && (key.code == KeyCode::Esc
                                     || (key.code == KeyCode::Char('c')
@@ -456,6 +464,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             } else if key.code == KeyCode::Char('q') && key.kind == KeyEventKind::Press {
                                 writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
                                 running = false;
+                            } else if key.code == KeyCode::Char(' ') && key.kind == KeyEventKind::Press {
+                                let now = Instant::now();
+                                if let Some(last_press) = *last_space_press {
+                                    if now.duration_since(last_press).as_millis() < 300 {
+                                        *is_flying = !*is_flying;
+                                        *velocity_y = 0.0;
+                                        *last_space_press = None;
+                                    } else {
+                                        *last_space_press = Some(now);
+                                        if !*is_flying && *is_grounded {
+                                            *velocity_y = 7.75;
+                                        }
+                                    }
+                                } else {
+                                    *last_space_press = Some(now);
+                                    if !*is_flying && *is_grounded {
+                                        *velocity_y = 7.75;
+                                    }
+                                }
+                                // IMPORTANT: We must still update the MovementInput for the flight case
+                                // because the double-tap logic above consumes the event.
+                                input.update(key);
+                            } else if key.kind == KeyEventKind::Press {
+                                input.update(key);
                             } else {
                                 input.update(key);
                             }
@@ -511,15 +543,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             GameState::StartScreen { selected_index, seed_text, cursor_pos } => {
                 render_start_screen(&mut fb, *selected_index, seed_text, *cursor_pos);
             }
-            GameState::Playing { world, camera, input, mouse_look } => {
+            GameState::Playing { world, camera, input, mouse_look, is_flying, velocity_y, last_space_press, is_grounded } => {
                 mouse_look.update_camera(camera)?;
 
                 let speed = 5.0;
-                let move_vec = Vec3::mul_scalar(input.direction(camera).normalize(), speed * delta_time);
+                let gravity = -20.0;
+                let delta_time = delta_time;
 
+                // Apply gravity if not flying
+                if !*is_flying {
+                    *velocity_y += gravity * delta_time;
+                }
+
+                // Ground detection
+                let mut grounded = false;
                 let hitbox_width = 0.6;
                 let hitbox_depth = 0.6;
                 let hitbox_height = 2.0;
+                let ground_y = (camera.position.y).floor() as i32;
+
+                let ground_offsets = [
+                    (0.0, 0.0),
+                    (hitbox_width, 0.0),
+                    (0.0, hitbox_depth),
+                    (hitbox_width, hitbox_depth),
+                ];
+                for (ox, oz) in ground_offsets {
+                    let wx = (camera.position.x + ox).floor() as i32;
+                    let wz = (camera.position.z + oz).floor() as i32;
+                    if world.get_block(wx, ground_y, wz) != Block::Air {
+                        grounded = true;
+                        break;
+                    }
+                }
+                *is_grounded = grounded;
+
+                let move_vec_dir = input.direction(camera, *is_flying);
+                let mut move_vec = Vec3::mul_scalar(move_vec_dir.normalize(), speed * delta_time);
+
+                // Apply vertical velocity
+                if !*is_flying {
+                    move_vec.y = *velocity_y * delta_time;
+                }
 
                 let mut next_position = camera.position;
 
@@ -581,6 +646,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 if !collided_y {
                     next_position.y = next_pos_y.y;
+                } else {
+                    // Handle vertical velocity reset on collision
+                    if *velocity_y < 0.0 {
+                        *velocity_y = 0.0;
+                    } else if *velocity_y > 0.0 {
+                        *velocity_y = 0.0;
+                    }
                 }
 
                 camera.position = next_position;
