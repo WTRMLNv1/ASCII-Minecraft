@@ -476,8 +476,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::Mouse(mouse_event)
                     if matches!(mouse_event.kind, MouseEventKind::Down(_)) =>
                 {
-                    if let GameState::Playing { mouse_look, .. } = &mut state {
+                    if let GameState::Playing { mouse_look, world, camera, .. } = &mut state {
                         mouse_look.lock()?;
+
+                        if let crossterm::event::MouseEventKind::Down(button) = mouse_event.kind {
+                            if button == crossterm::event::MouseButton::Left {
+                                let eye_position = Vec3::new(
+                                    camera.position.x + 0.5,
+                                    camera.position.y + 1.5,
+                                    camera.position.z + 0.5,
+                                );
+                                let direction = camera.get_forward();
+
+                                if let Some((hit_pos, _, _)) = world.raycast(eye_position, direction, 4.5) {
+                                    world.set_block(hit_pos.x, hit_pos.y, hit_pos.z, Block::Air);
+                                }
+                            }
+                        }
                     }
                 }
                 Event::Resize(new_w, new_h) => {

@@ -89,6 +89,147 @@ impl World {
             })
     }
 
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return;
+        }
+        let cx = x.div_euclid(CHUNK_SIZE);
+        let cz = z.div_euclid(CHUNK_SIZE);
+        let lx = x.rem_euclid(CHUNK_SIZE);
+        let lz = z.rem_euclid(CHUNK_SIZE);
+
+        if !self.chunks.contains_key(&(cx, cz)) {
+            self.chunks.insert((cx, cz), self.generate_chunk(cx, cz));
+        }
+
+        if let Some(chunk) = self.chunks.get_mut(&(cx, cz)) {
+            chunk.blocks[block_index(lx, y, lz)] = block;
+        }
+
+        // Refresh faces for this chunk and neighbors if on boundary
+        self.refresh_chunk_faces(cx, cz);
+        if lx == 0 { self.refresh_chunk_faces(cx - 1, cz); }
+        if lx == CHUNK_SIZE - 1 { self.refresh_chunk_faces(cx + 1, cz); }
+        if lz == 0 { self.refresh_chunk_faces(cx, cz - 1); }
+        if lz == CHUNK_SIZE - 1 { self.refresh_chunk_faces(cx, cz + 1); }
+    }
+
+    fn refresh_chunk_faces(&mut self, cx: i32, cz: i32) {
+        let mut faces_to_add = Vec::new();
+
+        if let Some(chunk) = self.chunks.get(&(cx, cz)) {
+            let ox = cx * CHUNK_SIZE;
+            let oz = cz * CHUNK_SIZE;
+
+            for lz in 0..CHUNK_SIZE {
+                for lx in 0..CHUNK_SIZE {
+                    for y in 0..WORLD_HEIGHT {
+                        let block = chunk.blocks[block_index(lx, y, lz)];
+                        if block == Block::Air { continue; }
+
+                        let x = ox + lx;
+                        let z = oz + lz;
+
+                        if y == WORLD_HEIGHT - 1 || self.get_block(x, y + 1, z) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::Top));
+                        }
+                        if self.get_block(x - 1, y, z) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::West));
+                        }
+                        if self.get_block(x + 1, y, z) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::East));
+                        }
+                        if self.get_block(x, y, z - 1) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::North));
+                        }
+                        if self.get_block(x, y, z + 1) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::South));
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(chunk) = self.chunks.get_mut(&(cx, cz)) {
+            chunk.faces.clear();
+            for (block, x, y, z, dir) in faces_to_add {
+                add_face(&mut chunk.faces, block, x, y, z, dir);
+            }
+        }
+    }
+
+    pub fn raycast(&self, origin: crate::math::vec::Vec3, direction: crate::math::vec::Vec3, max_dist: f32) -> Option<(crate::math::vec::IVec3, FaceDirection, f32)> {
+        let mut voxel_x = origin.x.floor() as i32;
+        let mut voxel_y = origin.y.floor() as i32;
+        let mut voxel_z = origin.z.floor() as i32;
+
+        let step_x = if direction.x > 0.0 { 1 } else { -1 };
+        let step_y = if direction.y > 0.0 { 1 } else { -1 };
+        let step_z = if direction.z > 0.0 { 1 } else { -1 };
+
+        let t_delta_x = if direction.x != 0.0 { (1.0 / direction.x).abs() } else { f32::INFINITY };
+        let t_delta_y = if direction.y != 0.0 { (1.0 / direction.y).abs() } else { f32::INFINITY };
+        let t_delta_z = if direction.z != 0.0 { (1.0 / direction.z).abs() } else { f32::INFINITY };
+
+        let mut t_max_x = if direction.x > 0.0 {
+            ((voxel_x as f32 + 1.0) - origin.x) / direction.x
+        } else if direction.x < 0.0 {
+            (voxel_x as f32 - origin.x) / direction.x
+        } else {
+            f32::INFINITY
+        };
+
+        let mut t_max_y = if direction.y > 0.0 {
+            ((voxel_y as f32 + 1.0) - origin.y) / direction.y
+        } else if direction.y < 0.0 {
+            (voxel_y as f32 - origin.y) / direction.y
+        } else {
+            f32::INFINITY
+        };
+
+        let mut t_max_z = if direction.z > 0.0 {
+            ((voxel_z as f32 + 1.0) - origin.z) / direction.z
+        } else if direction.z < 0.0 {
+            (voxel_z as f32 - origin.z) / direction.z
+        } else {
+            f32::INFINITY
+        };
+
+        let mut t = 0.0;
+        while t < max_dist {
+            if t_max_x < t_max_y && t_max_x < t_max_z {
+                voxel_x += step_x;
+                t = t_max_x;
+                t_max_x += t_delta_x;
+                let face = if step_x > 0 { FaceDirection::West } else { FaceDirection::East };
+                if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
+                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                }
+            } else if t_max_y < t_max_z {
+                voxel_y += step_y;
+                t = t_max_y;
+                t_max_y += t_delta_y;
+                // For Y axis, we'll use Top if stepping up, but our FaceDirection is limited.
+                // Let's just use Top for simplicity as it's the most common.
+                let face = if step_y > 0 { FaceDirection::Top } else { FaceDirection::Top };
+                if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
+                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                }
+            } else {
+                voxel_z += step_z;
+                t = t_max_z;
+                t_max_z += t_delta_z;
+                let face = if step_z > 0 { FaceDirection::North } else { FaceDirection::South };
+                if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
+                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                }
+            }
+        }
+
+        None
+    }
+
+
 
     fn generate_chunk(&self, chunk_x: i32, chunk_z: i32) -> Chunk {
         let mut blocks = vec![Block::Air; (CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) as usize];
@@ -167,8 +308,8 @@ fn block_at_height(surface: i32, y: i32) -> Block {
         Block::Stone
     }
 }
-#[derive(Clone, Copy)]
-enum FaceDirection {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaceDirection {
     Top,
     West,
     East,
