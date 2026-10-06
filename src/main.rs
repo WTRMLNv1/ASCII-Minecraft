@@ -529,6 +529,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 if let Some((hit_pos, _, _)) = world.raycast(eye_position, direction, 4.5) {
                                     world.set_block(hit_pos.x, hit_pos.y, hit_pos.z, Block::Air);
                                 }
+                            } else if button == crossterm::event::MouseButton::Right {
+                                let eye_position = Vec3::new(
+                                    camera.position.x + 0.5,
+                                    camera.position.y + 1.5,
+                                    camera.position.z + 0.5,
+                                );
+                                let direction = camera.get_forward();
+
+                                if let Some((hit_pos, face, _)) = world.raycast(eye_position, direction, 4.5) {
+                                    let (px, py, pz) = match face {
+                                        crate::world::FaceDirection::West if direction.x > 0.0 => (hit_pos.x - 1, hit_pos.y, hit_pos.z),
+                                        crate::world::FaceDirection::East if direction.x < 0.0 => (hit_pos.x + 1, hit_pos.y, hit_pos.z),
+                                        crate::world::FaceDirection::Top if direction.y < 0.0 => (hit_pos.x, hit_pos.y + 1, hit_pos.z),
+                                        crate::world::FaceDirection::Top if direction.y > 0.0 => (hit_pos.x, hit_pos.y - 1, hit_pos.z),
+                                        crate::world::FaceDirection::North if direction.z > 0.0 => (hit_pos.x, hit_pos.y, hit_pos.z - 1),
+                                        crate::world::FaceDirection::South if direction.z < 0.0 => (hit_pos.x, hit_pos.y, hit_pos.z + 1),
+                                        _ => (hit_pos.x, hit_pos.y, hit_pos.z), // Fallback
+                                    };
+
+                                    // Hitbox clipping check
+                                    let p_min_x = camera.position.x;
+                                    let p_max_x = camera.position.x + 0.6;
+                                    let p_min_y = camera.position.y;
+                                    let p_max_y = camera.position.y + 2.0;
+                                    let p_min_z = camera.position.z;
+                                    let p_max_z = camera.position.z + 0.6;
+
+                                    let b_min_x = px as f32;
+                                    let b_max_x = px as f32 + 1.0;
+                                    let b_min_y = py as f32;
+                                    let b_max_y = py as f32 + 1.0;
+                                    let b_min_z = pz as f32;
+                                    let b_max_z = pz as f32 + 1.0;
+
+                                    let intersects = (p_min_x < b_max_x && p_max_x > b_min_x)
+                                        && (p_min_y < b_max_y && p_max_y > b_min_y)
+                                        && (p_min_z < b_max_z && p_max_z > b_min_z);
+
+                                    if !intersects {
+                                        world.set_block(px, py, pz, Block::Stone);
+                                    }
+                                }
                             }
                         }
                     }
