@@ -11,6 +11,8 @@ pub enum Block {
     Grass,
     Dirt,
     Stone,
+    Log,
+    Leaves,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -32,6 +34,10 @@ pub struct World {
     base_noise: Fbm<Perlin>,
     mask_noise: Perlin,
     mountain_noise: Fbm<Perlin>,
+    /// Low-frequency noise selects contiguous forest regions.
+    forest_noise: Perlin,
+    /// Higher-frequency noise selects occasional trees outside forests.
+    sparse_tree_noise: Perlin,
 }
 
 impl World {
@@ -46,6 +52,8 @@ impl World {
                 .set_lacunarity(2.0),
             mask_noise: Perlin::new(seed_u32.wrapping_add(1)),
             mountain_noise: Fbm::<Perlin>::new(seed_u32.wrapping_add(2)),
+            forest_noise: Perlin::new(seed_u32.wrapping_add(3)),
+            sparse_tree_noise: Perlin::new(seed_u32.wrapping_add(4)),
         }
     }
 
@@ -62,11 +70,13 @@ impl World {
     }
 
     pub fn visible_faces(&self, cx: i32, cz: i32) -> impl Iterator<Item = &Face> {
-        self.chunks
-            .iter()
-            .filter_map(move |(&(x, z), chunk)| {
-                ((x - cx).pow(2) + (z - cz).pow(2) <= RENDER_DISTANCE.pow(2))
-                    .then_some(chunk.faces.as_slice())
+        (cz - RENDER_DISTANCE..=cz + RENDER_DISTANCE)
+            .flat_map(move |z| {
+                (cx - RENDER_DISTANCE..=cx + RENDER_DISTANCE).filter_map(move |x| {
+                    ((x - cx).pow(2) + (z - cz).pow(2) <= RENDER_DISTANCE.pow(2))
+                        .then(|| self.chunks.get(&(x, z)).map(|chunk| chunk.faces.as_slice()))
+                        .flatten()
+                })
             })
             .flatten()
     }
@@ -83,14 +93,7 @@ impl World {
         self.chunks
             .get(&(cx, cz))
             .map(|chunk| chunk.blocks[block_index(lx, y, lz)])
-            .unwrap_or_else(|| {
-                let h = self.surface_height(x, z);
-                if y <= h {
-                    block_at_height(h, y)
-                } else {
-                    Block::Air
-                }
-            })
+            .unwrap_or_else(|| self.generated_block_at(x, y, z))
     }
 
     pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
@@ -286,45 +289,174 @@ impl World {
 
     fn generate_chunk(&self, chunk_x: i32, chunk_z: i32) -> Chunk {
         let mut blocks = vec![Block::Air; (CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) as usize];
-        let mut heights = [[0_i32; CHUNK_SIZE as usize]; CHUNK_SIZE as usize];
         let ox = chunk_x * CHUNK_SIZE;
         let oz = chunk_z * CHUNK_SIZE;
         for lz in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
                 let h = self.surface_height(ox + lx, oz + lz);
-                heights[lz as usize][lx as usize] = h;
                 for y in 0..=h {
                     blocks[block_index(lx, y, lz)] = block_at_height(h, y);
                 }
             }
         }
+        self.populate_trees(&mut blocks, chunk_x, chunk_z);
+
         let mut faces = Vec::new();
         for lz in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
                 let x = ox + lx;
                 let z = oz + lz;
-                let h = heights[lz as usize][lx as usize];
-                add_face(
-                    &mut faces,
-                    blocks[block_index(lx, h, lz)],
-                    x,
-                    h,
-                    z,
-                    FaceDirection::Top,
-                );
-                for (dx, dz, dir) in [
-                    (-1, 0, FaceDirection::West),
-                    (1, 0, FaceDirection::East),
-                    (0, -1, FaceDirection::North),
-                    (0, 1, FaceDirection::South),
-                ] {
-                    for y in self.surface_height(x + dx, z + dz) + 1..=h {
-                        add_face(&mut faces, blocks[block_index(lx, y, lz)], x, y, z, dir);
+                for y in 0..WORLD_HEIGHT {
+                    let block = blocks[block_index(lx, y, lz)];
+                    if block == Block::Air {
+                        continue;
+                    }
+                    if y == WORLD_HEIGHT - 1 || blocks[block_index(lx, y + 1, lz)] == Block::Air {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::Top);
+                    }
+                    if (lx == 0 && self.generated_block_at(x - 1, y, z) == Block::Air)
+                        || (lx > 0 && blocks[block_index(lx - 1, y, lz)] == Block::Air)
+                    {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::West);
+                    }
+                    if (lx == CHUNK_SIZE - 1 && self.generated_block_at(x + 1, y, z) == Block::Air)
+                        || (lx < CHUNK_SIZE - 1 && blocks[block_index(lx + 1, y, lz)] == Block::Air)
+                    {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::East);
+                    }
+                    if (lz == 0 && self.generated_block_at(x, y, z - 1) == Block::Air)
+                        || (lz > 0 && blocks[block_index(lx, y, lz - 1)] == Block::Air)
+                    {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::North);
+                    }
+                    if (lz == CHUNK_SIZE - 1 && self.generated_block_at(x, y, z + 1) == Block::Air)
+                        || (lz < CHUNK_SIZE - 1 && blocks[block_index(lx, y, lz + 1)] == Block::Air)
+                    {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::South);
                     }
                 }
             }
         }
         Chunk { blocks, faces }
+    }
+
+    fn generated_block_at(&self, x: i32, y: i32, z: i32) -> Block {
+        if y < 0 || y >= WORLD_HEIGHT {
+            return Block::Air;
+        }
+        let surface = self.surface_height(x, z);
+        if y <= surface {
+            return block_at_height(surface, y);
+        }
+        self.tree_block_at(x, y, z).unwrap_or(Block::Air)
+    }
+
+    fn populate_trees(&self, blocks: &mut [Block], chunk_x: i32, chunk_z: i32) {
+        let ox = chunk_x * CHUNK_SIZE;
+        let oz = chunk_z * CHUNK_SIZE;
+        // A canopy extends two blocks from its trunk, so inspect origins just outside this chunk.
+        for tree_z in oz - 2..=oz + CHUNK_SIZE + 1 {
+            for tree_x in ox - 2..=ox + CHUNK_SIZE + 1 {
+                let Some(_) = self.tree_kind_at_origin(tree_x, tree_z) else {
+                    continue;
+                };
+                let trunk_base = self.surface_height(tree_x, tree_z) + 1;
+                for z in (tree_z - 2).max(oz)..=(tree_z + 2).min(oz + CHUNK_SIZE - 1) {
+                    for x in (tree_x - 2).max(ox)..=(tree_x + 2).min(ox + CHUNK_SIZE - 1) {
+                        for y in trunk_base..=(trunk_base + 6).min(WORLD_HEIGHT - 1) {
+                            if let Some(block) =
+                                self.tree_block_from_origin(tree_x, trunk_base, tree_z, x, y, z)
+                            {
+                                let lx = x - ox;
+                                let lz = z - oz;
+                                let index = block_index(lx, y, lz);
+                                if blocks[index] == Block::Air {
+                                    blocks[index] = block;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn tree_block_at(&self, x: i32, y: i32, z: i32) -> Option<Block> {
+        // Origins occur only at fixed lattice points, making adjacent canopies non-overlapping.
+        for grid in [6, 12] {
+            let cell_x = x.div_euclid(grid);
+            let cell_z = z.div_euclid(grid);
+            for cz in cell_z - 1..=cell_z + 1 {
+                for cx in cell_x - 1..=cell_x + 1 {
+                    let origin_x = cx * grid + grid / 2;
+                    let origin_z = cz * grid + grid / 2;
+                    if self.tree_kind_at_origin(origin_x, origin_z).is_some() {
+                        let base = self.surface_height(origin_x, origin_z) + 1;
+                        if let Some(block) =
+                            self.tree_block_from_origin(origin_x, base, origin_z, x, y, z)
+                        {
+                            return Some(block);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn tree_kind_at_origin(&self, x: i32, z: i32) -> Option<()> {
+        let forest_origin = x.rem_euclid(6) == 3 && z.rem_euclid(6) == 3;
+        let forest_value = self.forest_noise.get([x as f64 * 0.025, z as f64 * 0.025]);
+        if forest_origin && forest_value > 0.12 {
+            return Some(());
+        }
+
+        let sparse_origin = x.rem_euclid(12) == 6 && z.rem_euclid(12) == 6;
+        if !sparse_origin
+            || self
+                .sparse_tree_noise
+                .get([x as f64 * 0.11, z as f64 * 0.11])
+                <= 0.58
+        {
+            return None;
+        }
+
+        // Keep standalone trees clear of any nearby forest canopy.
+        let first_forest_x = (x - 6).div_euclid(6) * 6 + 3;
+        let first_forest_z = (z - 6).div_euclid(6) * 6 + 3;
+        for forest_z in (first_forest_z..=z + 6).step_by(6) {
+            for forest_x in (first_forest_x..=x + 6).step_by(6) {
+                if self
+                    .forest_noise
+                    .get([forest_x as f64 * 0.025, forest_z as f64 * 0.025])
+                    > 0.12
+                {
+                    return None;
+                }
+            }
+        }
+        Some(())
+    }
+
+    fn tree_block_from_origin(
+        &self,
+        origin_x: i32,
+        trunk_base: i32,
+        origin_z: i32,
+        x: i32,
+        y: i32,
+        z: i32,
+    ) -> Option<Block> {
+        if x == origin_x && z == origin_z && (trunk_base..trunk_base + 4).contains(&y) {
+            return Some(Block::Log);
+        }
+        let radius = match y - trunk_base {
+            3 => 1,
+            4 | 5 => 2,
+            6 => 1,
+            _ => return None,
+        };
+        ((x - origin_x).abs() <= radius && (z - origin_z).abs() <= radius).then_some(Block::Leaves)
     }
 
     fn surface_height(&self, x: i32, z: i32) -> i32 {
@@ -426,5 +558,24 @@ mod tests {
                 assert!((h - world.surface_height(x, z + 1)).abs() <= 5);
             }
         }
+    }
+
+    #[test]
+    fn generated_trees_have_logs_and_opaque_leaf_blocks() {
+        let world = World::new(1234);
+        let tree = (-48..48)
+            .flat_map(|z| (-48..48).map(move |x| (x, z)))
+            .find(|&(x, z)| world.tree_kind_at_origin(x, z).is_some())
+            .expect("the sampled world should contain a tree");
+        let trunk_base = world.surface_height(tree.0, tree.1) + 1;
+
+        assert_eq!(
+            world.generated_block_at(tree.0, trunk_base, tree.1),
+            Block::Log
+        );
+        assert!(
+            world.generated_block_at(tree.0 + 2, trunk_base + 4, tree.1) == Block::Leaves,
+            "the tree canopy should use leaf blocks"
+        );
     }
 }

@@ -1,8 +1,7 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TerminalColor {
-    Grey,
-    Green,
-    Yellow,
+    /// An xterm-256 palette index.  This keeps materials distinct on capable terminals.
+    Ansi256(u8),
 }
 
 pub struct Framebuffer {
@@ -19,7 +18,7 @@ impl Framebuffer {
             width,
             height,
             cells: vec![' '; width * height],
-            colors: vec![TerminalColor::Grey; width * height],
+            colors: vec![TerminalColor::Ansi256(250); width * height],
             depth: vec![f32::INFINITY; width * height],
         }
     }

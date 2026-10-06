@@ -20,7 +20,7 @@ impl TerminalGuard {
             EnterAlternateScreen,
             cursor::Hide,
             SetBackgroundColor(Color::Black),
-            SetForegroundColor(Color::Grey),
+            SetForegroundColor(Color::AnsiValue(250)),
             EnableFocusChange,
             EnableMouseCapture
         )?;
@@ -56,14 +56,14 @@ impl Terminal {
         Ok(Self {
             stdout: BufWriter::new(stdout()),
             previous_frame: vec![' '; width * height],
-            previous_colors: vec![TerminalColor::Grey; width * height],
-            active_color: TerminalColor::Grey,
+            previous_colors: vec![TerminalColor::Ansi256(250); width * height],
+            active_color: TerminalColor::Ansi256(250),
         })
     }
 
     pub fn resize(&mut self, width: usize, height: usize) {
         self.previous_frame = vec![' '; width * height];
-        self.previous_colors = vec![TerminalColor::Grey; width * height];
+        self.previous_colors = vec![TerminalColor::Ansi256(250); width * height];
     }
 
     pub fn render(&mut self, fb: &Framebuffer) -> Result<(), std::io::Error> {
@@ -100,8 +100,6 @@ impl Terminal {
 
 fn color_to_crossterm(color: TerminalColor) -> Color {
     match color {
-        TerminalColor::Grey => Color::Grey,
-        TerminalColor::Green => Color::Green,
-        TerminalColor::Yellow => Color::Yellow,
+        TerminalColor::Ansi256(index) => Color::AnsiValue(index),
     }
 }

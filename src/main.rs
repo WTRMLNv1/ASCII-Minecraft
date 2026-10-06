@@ -843,10 +843,14 @@ fn triangle_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
 
 fn block_shade(block: Block, brightness: f32) -> (char, TerminalColor) {
     let (material_brightness, color) = match block {
-        Block::Grass => (1.0, TerminalColor::Green),
-        Block::Dirt => (0.72, TerminalColor::Yellow),
-        Block::Stone => (0.48, TerminalColor::Grey),
-        Block::Air => (0.0, TerminalColor::Grey),
+        // xterm's 256-colour palette: natural greens, warm soil, neutral stone,
+        // and a dark bark that remain readable under the lighting gradient.
+        Block::Grass => (1.0, TerminalColor::Ansi256(71)),
+        Block::Dirt => (0.72, TerminalColor::Ansi256(137)),
+        Block::Stone => (0.48, TerminalColor::Ansi256(246)),
+        Block::Log => (0.66, TerminalColor::Ansi256(94)),
+        Block::Leaves => (0.88, TerminalColor::Ansi256(34)),
+        Block::Air => (0.0, TerminalColor::Ansi256(250)),
     };
     (shade_char(brightness * material_brightness), color)
 }
