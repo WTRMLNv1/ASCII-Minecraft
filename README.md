@@ -1,13 +1,14 @@
-```
- █████╗ ███████╗ ██████╗██╗██╗   ███╗   ███╗██╗     ███╗   ██╗
-██╔══██╗██╔════╝██╔════╝██║██║   ████╗ ████║██║     ████╗  ██║
-███████║███████╗██║     ██║██║   ██╔████╔██║██║     ██╔██╗ ██║
-██╔══██║╚════██║██║     ██║██║   ██║╚██╔╝██║██║     ██║╚██╗██║
-██║  ██║███████║╚██████╗██║██║   ██║ ╚═╝ ██║███████╗██║ ╚████║
-╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝╚═╝   ╚═╝     ╚═╝╚══════╝╚═╝  ╚═══╝
-```
+<img src="asciimln-logo.svg">
+
 > cool ascii art, i know :P
+
+
 i made minecraft clone but it renders completely in your terminal lol
+
+## what is it
+AsciiMLN is a life-changing game-changing, tide-changing, table-flipping invention by the greatest dev known to fucking mankind.
+It renders squares but with some goddamn text.
+fucktastic!
 
 ## what does it do
 
@@ -17,12 +18,13 @@ i made minecraft clone but it renders completely in your terminal lol
 - only changes the changed chars so it dont gotta do much
 - collision (AABB collision 🤓👆) so you dont clip thruough
 - works on resize in theory (breaks slightly)
+- ~~work in the mines~~ mining was also implemented (DDA Ray casting 🤓👆) with 4.5 blocks distance max to vapourise blocks (no delay lmfao)
 
 ## how its built
 
 held together mostly with rust and spite, specifically:
 
-- **`main.rs`**: 664 line long monster that haunts you at night, does basically most of the stuff
+- **`main.rs`**: 760 line long monster that haunts you at night, does basically most of the stuff
 - **`framebuffer.rs`**: A Z-buffered 2D character array used to compose frames before they are presented.
 - **`rendering`**: Implements the 3D pipeline, including:
     - **Camera**: Handles view and projection matrices.
@@ -45,6 +47,7 @@ held together mostly with rust and spite, specifically:
 - `C`: Down (shift wasn't working, sybau)
 - `Esc` or `Ctrl + C`: Releases the cursor lock (i implemented cursor lock losers)
 - `Q`: Quits the game
+- `H`: Makes you high (coming soon)
 
 ## Setting up and shit
 
@@ -67,7 +70,7 @@ cargo test
 ```
 
 ### 🔫⚖️ License
-MIT license. do whatever you want (assuming you understand the 25kb main.rs BAHAHA)
+MIT license. do whatever you want (assuming you understand the 31kb main.rs BAHAHA)
 
 ---
 
