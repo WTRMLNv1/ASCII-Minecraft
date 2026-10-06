@@ -76,14 +76,11 @@ impl Terminal {
                 if current_char != self.previous_frame[idx]
                     || current_color != self.previous_colors[idx]
                 {
-                    self.stdout
-                        .execute(cursor::MoveTo(x as u16, y as u16))?;
+                    self.stdout.execute(cursor::MoveTo(x as u16, y as u16))?;
 
                     if current_color != self.active_color {
                         self.stdout
-                            .execute(SetForegroundColor(
-                                color_to_crossterm(current_color)
-                            ))?;
+                            .execute(SetForegroundColor(color_to_crossterm(current_color)))?;
 
                         self.active_color = current_color;
                     }

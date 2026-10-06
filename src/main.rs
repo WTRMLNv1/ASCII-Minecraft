@@ -11,8 +11,6 @@ use crossterm::event::{
     self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 
-use std::fs::File;
-use std::io::Write;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -242,11 +240,16 @@ fn render_start_screen(
     let gap_logo_subtitle = 1;
     let gap_subtitle_menu = 2;
 
-    let content_height = LOGO.len() + gap_logo_subtitle + 1 /*subtitle*/ + gap_subtitle_menu + menu_block_height;
+    let content_height =
+        LOGO.len() + gap_logo_subtitle + 1 /*subtitle*/ + gap_subtitle_menu + menu_block_height;
     let content_start_y = (height.saturating_sub(content_height)) / 2;
 
     // --- Logo ---
-    let logo_width = LOGO.iter().map(|line| line.chars().count()).max().unwrap_or(0);
+    let logo_width = LOGO
+        .iter()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0);
     let logo_x = width.saturating_sub(logo_width) / 2;
     let logo_y = content_start_y;
 
@@ -351,12 +354,6 @@ fn render_start_screen(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("[debug] main started");
-
-    let mut debug_log = File::create("debug.log")?;
-    writeln!(debug_log, "[debug] main started")?;
-    writeln!(debug_log, "[debug] press q to quit")?;
-
     let guard = TerminalGuard::new()?;
 
     let (width, height) = crossterm::terminal::size()
@@ -368,14 +365,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut terminal = Terminal::new(width, height)?;
     let mut fb = Framebuffer::new(width, height);
-    writeln!(debug_log, "[debug] terminal created: {}x{}", width, height)?;
 
     let target_fps = 30;
     let target_frame_time = Duration::from_secs_f64(1.0 / target_fps as f64);
 
     let mut running = true;
-    let mut frame_count = 0_u64;
-    let mut last_debug_frame = Instant::now();
     let mut last_frame_start = Instant::now();
 
     let mut state = GameState::StartScreen {
@@ -395,11 +389,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match ev {
                 Event::Key(key) => {
                     match &mut state {
-                        GameState::StartScreen { selected_index, seed_text, cursor_pos } => {
+                        GameState::StartScreen {
+                            selected_index,
+                            seed_text,
+                            cursor_pos,
+                        } => {
                             if key.kind == KeyEventKind::Press {
                                 match key.code {
                                     KeyCode::Up => {
-                                        *selected_index = if *selected_index == 0 { 2 } else { *selected_index - 1 };
+                                        *selected_index = if *selected_index == 0 {
+                                            2
+                                        } else {
+                                            *selected_index - 1
+                                        };
                                     }
                                     KeyCode::Down => {
                                         *selected_index = (*selected_index + 1) % 3;
@@ -452,7 +454,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             }
                         }
-                        GameState::Playing { world, camera, input, mouse_look, is_flying, velocity_y, last_space_press, is_grounded } => {
+                        GameState::Playing {
+                            world,
+                            camera,
+                            input,
+                            mouse_look,
+                            is_flying,
+                            velocity_y,
+                            last_space_press,
+                            is_grounded,
+                        } => {
                             let unlock_requested = key.kind == KeyEventKind::Press
                                 && (key.code == KeyCode::Esc
                                     || (key.code == KeyCode::Char('c')
@@ -461,14 +472,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if unlock_requested {
                                 mouse_look.unlock();
                                 input.clear();
-                            } else if key.code == KeyCode::Char('q') && key.kind == KeyEventKind::Press {
-                                writeln!(debug_log, "[debug] q pressed; exiting main loop")?;
+                            } else if key.code == KeyCode::Char('q')
+                                && key.kind == KeyEventKind::Press
+                            {
                                 running = false;
                             } else if key.code == KeyCode::Char(' ') {
                                 // Windows sends repeated Press events while a key is held.  Only the
                                 // transition from released to pressed is a tap; repeats must not count
                                 // toward the double-tap flight toggle.
-                                let is_new_space_press = key.kind == KeyEventKind::Press && !input.up;
+                                let is_new_space_press =
+                                    key.kind == KeyEventKind::Press && !input.up;
 
                                 if is_new_space_press {
                                     let now = Instant::now();
@@ -506,7 +519,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 Event::FocusLost => {
-                    if let GameState::Playing { mouse_look, input, .. } = &mut state {
+                    if let GameState::Playing {
+                        mouse_look, input, ..
+                    } = &mut state
+                    {
                         mouse_look.unlock();
                         input.clear();
                     }
@@ -514,7 +530,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Event::Mouse(mouse_event)
                     if matches!(mouse_event.kind, MouseEventKind::Down(_)) =>
                 {
-                    if let GameState::Playing { mouse_look, world, camera, .. } = &mut state {
+                    if let GameState::Playing {
+                        mouse_look,
+                        world,
+                        camera,
+                        ..
+                    } = &mut state
+                    {
                         mouse_look.lock()?;
 
                         if let crossterm::event::MouseEventKind::Down(button) = mouse_event.kind {
@@ -526,7 +548,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                                 let direction = camera.get_forward();
 
-                                if let Some((hit_pos, _, _)) = world.raycast(eye_position, direction, 4.5) {
+                                if let Some((hit_pos, _, _)) =
+                                    world.raycast(eye_position, direction, 4.5)
+                                {
                                     world.set_block(hit_pos.x, hit_pos.y, hit_pos.z, Block::Air);
                                 }
                             } else if button == crossterm::event::MouseButton::Right {
@@ -537,14 +561,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                                 let direction = camera.get_forward();
 
-                                if let Some((hit_pos, face, _)) = world.raycast(eye_position, direction, 4.5) {
+                                if let Some((hit_pos, face, _)) =
+                                    world.raycast(eye_position, direction, 4.5)
+                                {
                                     let (px, py, pz) = match face {
-                                        crate::world::FaceDirection::West if direction.x > 0.0 => (hit_pos.x - 1, hit_pos.y, hit_pos.z),
-                                        crate::world::FaceDirection::East if direction.x < 0.0 => (hit_pos.x + 1, hit_pos.y, hit_pos.z),
-                                        crate::world::FaceDirection::Top if direction.y < 0.0 => (hit_pos.x, hit_pos.y + 1, hit_pos.z),
-                                        crate::world::FaceDirection::Top if direction.y > 0.0 => (hit_pos.x, hit_pos.y - 1, hit_pos.z),
-                                        crate::world::FaceDirection::North if direction.z > 0.0 => (hit_pos.x, hit_pos.y, hit_pos.z - 1),
-                                        crate::world::FaceDirection::South if direction.z < 0.0 => (hit_pos.x, hit_pos.y, hit_pos.z + 1),
+                                        crate::world::FaceDirection::West if direction.x > 0.0 => {
+                                            (hit_pos.x - 1, hit_pos.y, hit_pos.z)
+                                        }
+                                        crate::world::FaceDirection::East if direction.x < 0.0 => {
+                                            (hit_pos.x + 1, hit_pos.y, hit_pos.z)
+                                        }
+                                        crate::world::FaceDirection::Top if direction.y < 0.0 => {
+                                            (hit_pos.x, hit_pos.y + 1, hit_pos.z)
+                                        }
+                                        crate::world::FaceDirection::Top if direction.y > 0.0 => {
+                                            (hit_pos.x, hit_pos.y - 1, hit_pos.z)
+                                        }
+                                        crate::world::FaceDirection::North if direction.z > 0.0 => {
+                                            (hit_pos.x, hit_pos.y, hit_pos.z - 1)
+                                        }
+                                        crate::world::FaceDirection::South if direction.z < 0.0 => {
+                                            (hit_pos.x, hit_pos.y, hit_pos.z + 1)
+                                        }
                                         _ => (hit_pos.x, hit_pos.y, hit_pos.z), // Fallback
                                     };
 
@@ -588,10 +626,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fb.clear();
 
         match &mut state {
-            GameState::StartScreen { selected_index, seed_text, cursor_pos } => {
+            GameState::StartScreen {
+                selected_index,
+                seed_text,
+                cursor_pos,
+            } => {
                 render_start_screen(&mut fb, *selected_index, seed_text, *cursor_pos);
             }
-            GameState::Playing { world, camera, input, mouse_look, is_flying, velocity_y, last_space_press, is_grounded } => {
+            GameState::Playing {
+                world,
+                camera,
+                input,
+                mouse_look,
+                is_flying,
+                velocity_y,
+                last_space_press,
+                is_grounded,
+            } => {
                 mouse_look.update_camera(camera)?;
 
                 let speed = 5.0;
@@ -641,7 +692,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Resolve X-axis movement
                 let next_pos_x = Vec3::add(camera.position, Vec3::new(move_vec.x, 0.0, 0.0));
                 let mut collided_x = false;
-                let x_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                let x_offsets = [
+                    (0.0, 0.0),
+                    (hitbox_width, 0.0),
+                    (0.0, hitbox_depth),
+                    (hitbox_width, hitbox_depth),
+                ];
                 for (ox, oz) in x_offsets {
                     for py in [0.0, hitbox_height - 0.1] {
                         let world_x = (next_pos_x.x + ox).floor() as i32;
@@ -652,7 +708,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                     }
-                    if collided_x { break; }
+                    if collided_x {
+                        break;
+                    }
                 }
                 if !collided_x {
                     next_position.x = next_pos_x.x;
@@ -661,7 +719,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Resolve Z-axis movement
                 let next_pos_z = Vec3::add(next_position, Vec3::new(0.0, 0.0, move_vec.z));
                 let mut collided_z = false;
-                let z_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                let z_offsets = [
+                    (0.0, 0.0),
+                    (hitbox_width, 0.0),
+                    (0.0, hitbox_depth),
+                    (hitbox_width, hitbox_depth),
+                ];
                 for (ox, oz) in z_offsets {
                     for py in [0.0, hitbox_height - 0.1] {
                         let world_x = (next_pos_z.x + ox).floor() as i32;
@@ -672,7 +735,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                     }
-                    if collided_z { break; }
+                    if collided_z {
+                        break;
+                    }
                 }
                 if !collided_z {
                     next_position.z = next_pos_z.z;
@@ -681,7 +746,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Resolve Y-axis movement
                 let next_pos_y = Vec3::add(next_position, Vec3::new(0.0, move_vec.y, 0.0));
                 let mut collided_y = false;
-                let y_offsets = [(0.0, 0.0), (hitbox_width, 0.0), (0.0, hitbox_depth), (hitbox_width, hitbox_depth)];
+                let y_offsets = [
+                    (0.0, 0.0),
+                    (hitbox_width, 0.0),
+                    (0.0, hitbox_depth),
+                    (hitbox_width, hitbox_depth),
+                ];
                 for (ox, oz) in y_offsets {
                     for py in [0.0, hitbox_height - 0.1] {
                         let world_x = (next_pos_y.x + ox).floor() as i32;
@@ -692,7 +762,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             break;
                         }
                     }
-                    if collided_y { break; }
+                    if collided_y {
+                        break;
+                    }
                 }
                 if !collided_y {
                     next_position.y = next_pos_y.y;
@@ -723,56 +795,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let camera_chunk_z = (camera.position.z.floor() as i32).div_euclid(CHUNK_SIZE);
                 world.ensure_render_distance(camera_chunk_x, camera_chunk_z);
 
-                let mut visible_faces = 0;
-                let mut rasterized_triangles = 0;
-                let mut shaded_cells = 0;
                 for face in world.visible_faces(camera_chunk_x, camera_chunk_z) {
                     let vertices = face.corners.map(|[x, y, z]| Vec3::new(x, y, z));
                     let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
                     if Vec3::dot(normal, Vec3::sub(eye_position, vertices[0])) <= 0.0 {
                         continue;
                     }
-                    let projected =
-                        vertices.map(|vertex| project_vertex_with_depth(vertex, &mvp, width, height));
+                    let projected = vertices
+                        .map(|vertex| project_vertex_with_depth(vertex, &mvp, width, height));
                     let (Some(p0), Some(p1), Some(p2), Some(p3)) =
                         (projected[0], projected[1], projected[2], projected[3])
                     else {
                         continue;
                     };
-                    visible_faces += 1;
                     let (ch, color) = block_shade(
                         face.block,
                         0.18 + Vec3::dot(normal, light_dir).max(0.0) * 0.82,
                     );
                     for (a, b, c) in [(p0, p1, p2), (p0, p2, p3)] {
-                        let written = rasterize_triangle(&mut fb, a, b, c, ch, color);
-                        if written > 0 {
-                            rasterized_triangles += 1;
-                            shaded_cells += written;
-                        }
+                        rasterize_triangle(&mut fb, a, b, c, ch, color);
                     }
                 }
 
-                let status =
-                    "ASCII Minecraft | WASD move | Space jump/up | double Space fly | C down | Esc/Ctrl+C release mouse | q quits";
+                let status = "ASCII Minecraft | WASD move | Space jump/up | double Space fly | C down | Esc/Ctrl+C release mouse | q quits";
                 for (x, ch) in status.chars().take(width).enumerate() {
                     fb.set(x, height - 1, ch);
-                }
-
-                if frame_count == 0 || last_debug_frame.elapsed() >= Duration::from_secs(1) {
-                    writeln!(
-                        debug_log,
-                        "[debug] frame={frame_count} position=({:.2}, {:.2}, {:.2}) visible_faces={visible_faces} rasterized_triangles={rasterized_triangles} shaded_cells={shaded_cells}",
-                        camera.position.x, camera.position.y, camera.position.z,
-                    )?;
-                    debug_log.flush()?;
-                    last_debug_frame = Instant::now();
                 }
             }
         }
 
         terminal.render(&fb)?;
-        frame_count += 1;
 
         let frame_elapsed = frame_start.elapsed();
         if frame_elapsed < target_frame_time {
@@ -781,7 +833,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     drop(guard);
-    eprintln!("[debug] exited cleanly after {frame_count} frames; see debug.log");
 
     Ok(())
 }

@@ -1,5 +1,5 @@
+use noise::{Fbm, MultiFractal, NoiseFn, Perlin};
 use std::collections::HashMap;
-use noise::{NoiseFn, Fbm, Perlin, MultiFractal};
 
 pub const CHUNK_SIZE: i32 = 16;
 pub const WORLD_HEIGHT: i32 = 64;
@@ -112,10 +112,18 @@ impl World {
 
         // Refresh faces for this chunk and neighbors if on boundary
         self.refresh_chunk_faces(cx, cz);
-        if lx == 0 { self.refresh_chunk_faces(cx - 1, cz); }
-        if lx == CHUNK_SIZE - 1 { self.refresh_chunk_faces(cx + 1, cz); }
-        if lz == 0 { self.refresh_chunk_faces(cx, cz - 1); }
-        if lz == CHUNK_SIZE - 1 { self.refresh_chunk_faces(cx, cz + 1); }
+        if lx == 0 {
+            self.refresh_chunk_faces(cx - 1, cz);
+        }
+        if lx == CHUNK_SIZE - 1 {
+            self.refresh_chunk_faces(cx + 1, cz);
+        }
+        if lz == 0 {
+            self.refresh_chunk_faces(cx, cz - 1);
+        }
+        if lz == CHUNK_SIZE - 1 {
+            self.refresh_chunk_faces(cx, cz + 1);
+        }
     }
 
     fn refresh_chunk_faces(&mut self, cx: i32, cz: i32) {
@@ -129,7 +137,9 @@ impl World {
                 for lx in 0..CHUNK_SIZE {
                     for y in 0..WORLD_HEIGHT {
                         let block = chunk.blocks[block_index(lx, y, lz)];
-                        if block == Block::Air { continue; }
+                        if block == Block::Air {
+                            continue;
+                        }
 
                         let x = ox + lx;
                         let z = oz + lz;
@@ -162,7 +172,12 @@ impl World {
         }
     }
 
-    pub fn raycast(&self, origin: crate::math::vec::Vec3, direction: crate::math::vec::Vec3, max_dist: f32) -> Option<(crate::math::vec::IVec3, FaceDirection, f32)> {
+    pub fn raycast(
+        &self,
+        origin: crate::math::vec::Vec3,
+        direction: crate::math::vec::Vec3,
+        max_dist: f32,
+    ) -> Option<(crate::math::vec::IVec3, FaceDirection, f32)> {
         let mut voxel_x = origin.x.floor() as i32;
         let mut voxel_y = origin.y.floor() as i32;
         let mut voxel_z = origin.z.floor() as i32;
@@ -171,9 +186,21 @@ impl World {
         let step_y = if direction.y > 0.0 { 1 } else { -1 };
         let step_z = if direction.z > 0.0 { 1 } else { -1 };
 
-        let t_delta_x = if direction.x != 0.0 { (1.0 / direction.x).abs() } else { f32::INFINITY };
-        let t_delta_y = if direction.y != 0.0 { (1.0 / direction.y).abs() } else { f32::INFINITY };
-        let t_delta_z = if direction.z != 0.0 { (1.0 / direction.z).abs() } else { f32::INFINITY };
+        let t_delta_x = if direction.x != 0.0 {
+            (1.0 / direction.x).abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_delta_y = if direction.y != 0.0 {
+            (1.0 / direction.y).abs()
+        } else {
+            f32::INFINITY
+        };
+        let t_delta_z = if direction.z != 0.0 {
+            (1.0 / direction.z).abs()
+        } else {
+            f32::INFINITY
+        };
 
         let mut t_max_x = if direction.x > 0.0 {
             ((voxel_x as f32 + 1.0) - origin.x) / direction.x
@@ -205,9 +232,17 @@ impl World {
                 voxel_x += step_x;
                 t = t_max_x;
                 t_max_x += t_delta_x;
-                let face = if step_x > 0 { FaceDirection::West } else { FaceDirection::East };
+                let face = if step_x > 0 {
+                    FaceDirection::West
+                } else {
+                    FaceDirection::East
+                };
                 if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
-                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                    return Some((
+                        crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z),
+                        face,
+                        t,
+                    ));
                 }
             } else if t_max_y < t_max_z {
                 voxel_y += step_y;
@@ -215,25 +250,39 @@ impl World {
                 t_max_y += t_delta_y;
                 // For Y axis, we'll use Top if stepping up, but our FaceDirection is limited.
                 // Let's just use Top for simplicity as it's the most common.
-                let face = if step_y > 0 { FaceDirection::Top } else { FaceDirection::Top };
+                let face = if step_y > 0 {
+                    FaceDirection::Top
+                } else {
+                    FaceDirection::Top
+                };
                 if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
-                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                    return Some((
+                        crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z),
+                        face,
+                        t,
+                    ));
                 }
             } else {
                 voxel_z += step_z;
                 t = t_max_z;
                 t_max_z += t_delta_z;
-                let face = if step_z > 0 { FaceDirection::North } else { FaceDirection::South };
+                let face = if step_z > 0 {
+                    FaceDirection::North
+                } else {
+                    FaceDirection::South
+                };
                 if self.get_block(voxel_x, voxel_y, voxel_z) != Block::Air {
-                    return Some((crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z), face, t));
+                    return Some((
+                        crate::math::vec::IVec3::new(voxel_x, voxel_y, voxel_z),
+                        face,
+                        t,
+                    ));
                 }
             }
         }
 
         None
     }
-
-
 
     fn generate_chunk(&self, chunk_x: i32, chunk_z: i32) -> Chunk {
         let mut blocks = vec![Block::Air; (CHUNK_SIZE * CHUNK_SIZE * WORLD_HEIGHT) as usize];
@@ -297,8 +346,7 @@ impl World {
 
         let final_h = 32.0 + base_h + (mask * mt_h);
 
-        (final_h.round() as i32)
-            .clamp(1, WORLD_HEIGHT - 2)
+        (final_h.round() as i32).clamp(1, WORLD_HEIGHT - 2)
     }
 }
 

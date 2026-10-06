@@ -3,6 +3,11 @@ name = "ascii-minecraft"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+# Keep the crate name descriptive while making the installed command short and stable.
+name = "asciimln"
+path = "src/main.rs"
+
 [dependencies]
 crossterm = "0.29.0"
 noise = "0.9.0"
