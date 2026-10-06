@@ -4,6 +4,7 @@ use std::collections::HashMap;
 pub const CHUNK_SIZE: i32 = 16;
 pub const WORLD_HEIGHT: i32 = 64;
 pub const RENDER_DISTANCE: i32 = 4;
+pub const CLOUD_HEIGHT: i32 = 60;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Block {
@@ -13,6 +14,7 @@ pub enum Block {
     Stone,
     Log,
     Leaves,
+    Cloud,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -29,7 +31,6 @@ pub struct Chunk {
 
 /// Seeded 16x16x64 terrain. Chunks retain only exposed faces for rendering.
 pub struct World {
-    seed: u64,
     chunks: HashMap<(i32, i32), Chunk>,
     base_noise: Fbm<Perlin>,
     mask_noise: Perlin,
@@ -38,13 +39,15 @@ pub struct World {
     forest_noise: Perlin,
     /// Higher-frequency noise selects occasional trees outside forests.
     sparse_tree_noise: Perlin,
+    /// Broad, seed-derived patches of cloud blocks.
+    cloud_noise: Fbm<Perlin>,
+    cloud_time: f32,
 }
 
 impl World {
     pub fn new(seed: u64) -> Self {
         let seed_u32 = seed as u32;
         Self {
-            seed,
             chunks: HashMap::new(),
             base_noise: Fbm::<Perlin>::new(seed_u32)
                 .set_octaves(3)
@@ -54,7 +57,26 @@ impl World {
             mountain_noise: Fbm::<Perlin>::new(seed_u32.wrapping_add(2)),
             forest_noise: Perlin::new(seed_u32.wrapping_add(3)),
             sparse_tree_noise: Perlin::new(seed_u32.wrapping_add(4)),
+            cloud_noise: Fbm::<Perlin>::new(seed_u32.wrapping_add(5))
+                .set_octaves(2)
+                .set_persistence(0.55)
+                .set_lacunarity(2.0),
+            // A seed-dependent starting point keeps drift deterministic per world.
+            cloud_time: (seed % 10_000) as f32 * 0.001,
         }
+    }
+
+    /// Advances the visual cloud layer without rebuilding chunk meshes.
+    pub fn advance_clouds(&mut self, delta_seconds: f32) {
+        self.cloud_time = (self.cloud_time + delta_seconds * 0.18) % std::f32::consts::TAU;
+    }
+
+    /// Slow, gentle horizontal drift applied to cloud faces during rendering.
+    pub fn cloud_drift(&self) -> (f32, f32) {
+        (
+            self.cloud_time.sin() * 3.0,
+            (self.cloud_time * 0.7).cos() * 1.5,
+        )
     }
 
     pub fn ensure_render_distance(&mut self, cx: i32, cz: i32) {
@@ -149,6 +171,9 @@ impl World {
 
                         if y == WORLD_HEIGHT - 1 || self.get_block(x, y + 1, z) == Block::Air {
                             faces_to_add.push((block, x, y, z, FaceDirection::Top));
+                        }
+                        if y == 0 || self.get_block(x, y - 1, z) == Block::Air {
+                            faces_to_add.push((block, x, y, z, FaceDirection::Bottom));
                         }
                         if self.get_block(x - 1, y, z) == Block::Air {
                             faces_to_add.push((block, x, y, z, FaceDirection::West));
@@ -251,10 +276,8 @@ impl World {
                 voxel_y += step_y;
                 t = t_max_y;
                 t_max_y += t_delta_y;
-                // For Y axis, we'll use Top if stepping up, but our FaceDirection is limited.
-                // Let's just use Top for simplicity as it's the most common.
                 let face = if step_y > 0 {
-                    FaceDirection::Top
+                    FaceDirection::Bottom
                 } else {
                     FaceDirection::Top
                 };
@@ -300,6 +323,7 @@ impl World {
             }
         }
         self.populate_trees(&mut blocks, chunk_x, chunk_z);
+        self.populate_clouds(&mut blocks, chunk_x, chunk_z);
 
         let mut faces = Vec::new();
         for lz in 0..CHUNK_SIZE {
@@ -313,6 +337,9 @@ impl World {
                     }
                     if y == WORLD_HEIGHT - 1 || blocks[block_index(lx, y + 1, lz)] == Block::Air {
                         add_face(&mut faces, block, x, y, z, FaceDirection::Top);
+                    }
+                    if y == 0 || blocks[block_index(lx, y - 1, lz)] == Block::Air {
+                        add_face(&mut faces, block, x, y, z, FaceDirection::Bottom);
                     }
                     if (lx == 0 && self.generated_block_at(x - 1, y, z) == Block::Air)
                         || (lx > 0 && blocks[block_index(lx - 1, y, lz)] == Block::Air)
@@ -348,7 +375,29 @@ impl World {
         if y <= surface {
             return block_at_height(surface, y);
         }
+        if y == CLOUD_HEIGHT && self.is_cloud_at(x, z) {
+            return Block::Cloud;
+        }
         self.tree_block_at(x, y, z).unwrap_or(Block::Air)
+    }
+
+    fn populate_clouds(&self, blocks: &mut [Block], chunk_x: i32, chunk_z: i32) {
+        let ox = chunk_x * CHUNK_SIZE;
+        let oz = chunk_z * CHUNK_SIZE;
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let x = ox + lx;
+                let z = oz + lz;
+                let index = block_index(lx, CLOUD_HEIGHT, lz);
+                if blocks[index] == Block::Air && self.is_cloud_at(x, z) {
+                    blocks[index] = Block::Cloud;
+                }
+            }
+        }
+    }
+
+    fn is_cloud_at(&self, x: i32, z: i32) -> bool {
+        self.cloud_noise.get([x as f64 * 0.035, z as f64 * 0.035]) > 0.18
     }
 
     fn populate_trees(&self, blocks: &mut [Block], chunk_x: i32, chunk_z: i32) {
@@ -502,6 +551,7 @@ fn block_at_height(surface: i32, y: i32) -> Block {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaceDirection {
     Top,
+    Bottom,
     West,
     East,
     North,
@@ -515,6 +565,12 @@ fn add_face(faces: &mut Vec<Face>, block: Block, x: i32, y: i32, z: i32, d: Face
             [x, y + 1.0, z + 1.0],
             [x + 1.0, y + 1.0, z + 1.0],
             [x + 1.0, y + 1.0, z],
+        ],
+        FaceDirection::Bottom => [
+            [x, y, z],
+            [x + 1.0, y, z],
+            [x + 1.0, y, z + 1.0],
+            [x, y, z + 1.0],
         ],
         FaceDirection::West => [
             [x, y, z + 1.0],
@@ -576,6 +632,19 @@ mod tests {
         assert!(
             world.generated_block_at(tree.0 + 2, trunk_base + 4, tree.1) == Block::Leaves,
             "the tree canopy should use leaf blocks"
+        );
+    }
+
+    #[test]
+    fn clouds_are_seeded_white_block_candidates_at_y_60() {
+        let world = World::new(1234);
+        let cloud = (-128..128)
+            .flat_map(|z| (-128..128).map(move |x| (x, z)))
+            .find(|&(x, z)| world.is_cloud_at(x, z))
+            .expect("the sampled world should contain clouds");
+        assert_eq!(
+            world.generated_block_at(cloud.0, CLOUD_HEIGHT, cloud.1),
+            Block::Cloud
         );
     }
 }

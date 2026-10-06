@@ -574,7 +574,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         crate::world::FaceDirection::Top if direction.y < 0.0 => {
                                             (hit_pos.x, hit_pos.y + 1, hit_pos.z)
                                         }
-                                        crate::world::FaceDirection::Top if direction.y > 0.0 => {
+                                        crate::world::FaceDirection::Bottom
+                                            if direction.y > 0.0 =>
+                                        {
                                             (hit_pos.x, hit_pos.y - 1, hit_pos.z)
                                         }
                                         crate::world::FaceDirection::North if direction.z > 0.0 => {
@@ -794,9 +796,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let camera_chunk_x = (camera.position.x.floor() as i32).div_euclid(CHUNK_SIZE);
                 let camera_chunk_z = (camera.position.z.floor() as i32).div_euclid(CHUNK_SIZE);
                 world.ensure_render_distance(camera_chunk_x, camera_chunk_z);
+                world.advance_clouds(delta_time);
+                let cloud_drift = world.cloud_drift();
 
                 for face in world.visible_faces(camera_chunk_x, camera_chunk_z) {
-                    let vertices = face.corners.map(|[x, y, z]| Vec3::new(x, y, z));
+                    let vertices = face.corners.map(|[x, y, z]| {
+                        let (drift_x, drift_z) = if face.block == Block::Cloud {
+                            cloud_drift
+                        } else {
+                            (0.0, 0.0)
+                        };
+                        Vec3::new(x + drift_x, y, z + drift_z)
+                    });
                     let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
                     if Vec3::dot(normal, Vec3::sub(eye_position, vertices[0])) <= 0.0 {
                         continue;
@@ -850,6 +861,7 @@ fn block_shade(block: Block, brightness: f32) -> (char, TerminalColor) {
         Block::Stone => (0.48, TerminalColor::Ansi256(246)),
         Block::Log => (0.66, TerminalColor::Ansi256(94)),
         Block::Leaves => (0.88, TerminalColor::Ansi256(34)),
+        Block::Cloud => (1.0, TerminalColor::Ansi256(255)),
         Block::Air => (0.0, TerminalColor::Ansi256(250)),
     };
     (shade_char(brightness * material_brightness), color)
