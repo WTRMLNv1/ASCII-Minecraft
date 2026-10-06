@@ -51,15 +51,34 @@ held together mostly with rust and spite, specifically:
 
 ## Install on Windows
 
-No Rust or other dependency is required to play. After publishing a GitHub Release,
-users can install the latest version from any PowerShell terminal with one command:
+no 10gb of rust (fabuloos!):
+
+### install it like a normal person (one command)
+
+open PowerShell and paste this in there:
 
 ```powershell
 irm https://raw.githubusercontent.com/wtrmlnv1/asciimln/main/install.ps1 | iex
 ```
 
-That downloads `asciimln.exe` into `%LOCALAPPDATA%\AsciiMLN`, adds that folder to the
-user PATH, and makes `asciimln` available from any new terminal. Run it again to update.
+it downloads the latest version, puts it in your PATH and then you can type this
+in any new terminal window forever:
+
+```powershell
+asciimln
+```
+
+run the install command again later if i somehow make the game less broken.
+
+### download it yourself (if you don't trust commands off the internet, like an overcaffeinated squirrel)
+
+1. go to [Releases](https://github.com/wtrmlnv1/asciimln/releases/latest)
+2. download `asciimln-windows-x86_64.exe` (or `asciimln.exe`)
+3. double-click it, or open a terminal in that folder and run:
+
+```powershell
+.\asciimln-windows-x86_64.exe
+```
 
 > The release must include `asciimln-windows-x86_64.exe` (or `asciimln.exe` when
 > uploading manually). The included GitHub Actions release workflow creates the
