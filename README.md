@@ -22,7 +22,7 @@ fucktastic!
 
 ## gameplay typa shi
 
-<video src="gameplay_demo.mp4">
+<video src="gameplay_demo.mp4" controls></video>
 
 ## how its built
 
