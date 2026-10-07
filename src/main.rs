@@ -17,7 +17,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::math::mat::Mat4;
 use crate::math::vec::Vec3;
 use crate::rendering::camera::Camera;
-use crate::rendering::pipeline::{project_vertex_with_depth, rasterize_triangle, shade_char};
+use crate::rendering::pipeline::{
+    project_vertex_with_depth, rasterize_transparent_triangle, rasterize_triangle, shade_char,
+};
 use crate::world::{Block, CHUNK_SIZE, World};
 use windows_sys::Win32::Foundation::POINT;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -468,7 +470,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 camera.position.x.floor() as i32,
                                 (camera.position.y + 1.0).floor() as i32,
                                 camera.position.z.floor() as i32,
-                            ) == Block::Water && !*is_flying;
+                            ) == Block::Water
+                                && !*is_flying;
 
                             let unlock_requested = key.kind == KeyEventKind::Press
                                 && (key.code == KeyCode::Esc
@@ -478,7 +481,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             if unlock_requested {
                                 mouse_look.unlock();
                                 input.clear();
-                            } else if key.code == KeyCode::Char('q')
+                            } else if matches!(key.code, KeyCode::Char('q' | 'Q'))
                                 && key.kind == KeyEventKind::Press
                             {
                                 running = false;
@@ -665,7 +668,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     camera.position.x.floor() as i32,
                     (camera.position.y + 1.0).floor() as i32,
                     camera.position.z.floor() as i32,
-                ) == Block::Water && !*is_flying;
+                ) == Block::Water
+                    && !*is_flying;
 
                 let speed = if is_swimming { 2.5 } else { 5.0 };
                 let gravity = if is_swimming { -2.0 } else { -20.0 };
@@ -725,7 +729,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_x.x + ox).floor() as i32;
                         let world_y = (next_pos_x.y + py).floor() as i32;
                         let world_z = (next_pos_x.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air
+                            && world.get_block(world_x, world_y, world_z) != Block::Water
+                        {
                             collided_x = true;
                             break;
                         }
@@ -752,7 +758,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_z.x + ox).floor() as i32;
                         let world_y = (next_pos_z.y + py).floor() as i32;
                         let world_z = (next_pos_z.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air
+                            && world.get_block(world_x, world_y, world_z) != Block::Water
+                        {
                             collided_z = true;
                             break;
                         }
@@ -779,7 +787,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_y.x + ox).floor() as i32;
                         let world_y = (next_pos_y.y + py).floor() as i32;
                         let world_z = (next_pos_y.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air
+                            && world.get_block(world_x, world_y, world_z) != Block::Water
+                        {
                             collided_y = true;
                             break;
                         }
@@ -806,6 +816,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     camera.position.y + 1.5,
                     camera.position.z + 0.5,
                 );
+                let camera_underwater = world.get_block(
+                    eye_position.x.floor() as i32,
+                    eye_position.y.floor() as i32,
+                    eye_position.z.floor() as i32,
+                ) == Block::Water;
                 let view = camera.get_view_matrix_at(eye_position);
 
                 let projection =
@@ -819,7 +834,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 world.advance_clouds(delta_time);
                 let cloud_drift = world.cloud_drift();
 
-                for face in world.visible_faces(camera_chunk_x, camera_chunk_z) {
+                // Opaque terrain establishes the depth buffer first.  Water is
+                // composited afterwards, allowing terrain behind it to remain visible.
+                for face in world
+                    .visible_faces(camera_chunk_x, camera_chunk_z)
+                    .filter(|face| face.block != Block::Water)
+                {
                     let vertices = face.corners.map(|[x, y, z]| {
                         let (drift_x, drift_z) = if face.block == Block::Cloud {
                             cloud_drift
@@ -846,6 +866,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     for (a, b, c) in [(p0, p1, p2), (p0, p2, p3)] {
                         rasterize_triangle(&mut fb, a, b, c, ch, color);
                     }
+                }
+
+                for face in world
+                    .visible_faces(camera_chunk_x, camera_chunk_z)
+                    .filter(|face| face.block == Block::Water)
+                {
+                    let vertices = face.corners.map(|[x, y, z]| Vec3::new(x, y, z));
+                    let normal = triangle_normal(vertices[0], vertices[1], vertices[2]);
+                    if Vec3::dot(normal, Vec3::sub(eye_position, vertices[0])) <= 0.0 {
+                        continue;
+                    }
+                    let projected = vertices
+                        .map(|vertex| project_vertex_with_depth(vertex, &mvp, width, height));
+                    let (Some(p0), Some(p1), Some(p2), Some(p3)) =
+                        (projected[0], projected[1], projected[2], projected[3])
+                    else {
+                        continue;
+                    };
+                    let (ch, color) = block_shade(
+                        Block::Water,
+                        0.18 + Vec3::dot(normal, light_dir).max(0.0) * 0.82,
+                    );
+                    for (a, b, c) in [(p0, p1, p2), (p0, p2, p3)] {
+                        rasterize_transparent_triangle(&mut fb, a, b, c, ch, color, 0.38);
+                    }
+                }
+
+                if camera_underwater {
+                    fb.tint_blue(0.20);
                 }
 
                 let status = "ASCII Minecraft | WASD move | Space jump/up | double Space fly | C down | Esc/Ctrl+C release mouse | q quits";

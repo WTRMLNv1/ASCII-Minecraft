@@ -101,5 +101,6 @@ impl Terminal {
 fn color_to_crossterm(color: TerminalColor) -> Color {
     match color {
         TerminalColor::Ansi256(index) => Color::AnsiValue(index),
+        TerminalColor::Rgb(r, g, b) => Color::Rgb { r, g, b },
     }
 }
