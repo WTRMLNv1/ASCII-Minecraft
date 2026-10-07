@@ -15,6 +15,7 @@ pub enum Block {
     Log,
     Leaves,
     Cloud,
+    Water,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -42,6 +43,7 @@ pub struct World {
     /// Broad, seed-derived patches of cloud blocks.
     cloud_noise: Fbm<Perlin>,
     cloud_time: f32,
+    basin_noise: Perlin,
 }
 
 impl World {
@@ -63,6 +65,7 @@ impl World {
                 .set_lacunarity(2.0),
             // A seed-dependent starting point keeps drift deterministic per world.
             cloud_time: (seed % 10_000) as f32 * 0.001,
+            basin_noise: Perlin::new(seed_u32.wrapping_add(6)),
         }
     }
 
@@ -325,6 +328,22 @@ impl World {
         self.populate_trees(&mut blocks, chunk_x, chunk_z);
         self.populate_clouds(&mut blocks, chunk_x, chunk_z);
 
+        // Water fill pass
+        const SEA_LEVEL: i32 = 30;
+        for lz in 0..CHUNK_SIZE {
+            for lx in 0..CHUNK_SIZE {
+                let h = self.surface_height(ox + lx, oz + lz);
+                for y in (h + 1)..=SEA_LEVEL {
+                    if y < WORLD_HEIGHT {
+                        let index = block_index(lx, y, lz);
+                        if blocks[index] == Block::Air {
+                            blocks[index] = Block::Water;
+                        }
+                    }
+                }
+            }
+        }
+
         let mut faces = Vec::new();
         for lz in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
@@ -525,7 +544,15 @@ impl World {
         let mt_val = self.mountain_noise.get([x_f * 0.02, z_f * 0.02]);
         let mt_h = mt_val * 25.0;
 
-        let final_h = 32.0 + base_h + (mask * mt_h);
+        // Layer 4: Basin offset
+        let basin_val = self.basin_noise.get([x_f * 0.01, z_f * 0.01]);
+        let basin_offset = if basin_val < -0.2 {
+            (basin_val + 0.2) * 10.0
+        } else {
+            0.0
+        };
+
+        let final_h = 32.0 + base_h + (mask * mt_h) + basin_offset;
 
         (final_h.round() as i32).clamp(1, WORLD_HEIGHT - 2)
     }

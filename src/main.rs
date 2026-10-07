@@ -464,6 +464,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             last_space_press,
                             is_grounded,
                         } => {
+                            let is_swimming = world.get_block(
+                                camera.position.x.floor() as i32,
+                                (camera.position.y + 1.0).floor() as i32,
+                                camera.position.z.floor() as i32,
+                            ) == Block::Water && !*is_flying;
+
                             let unlock_requested = key.kind == KeyEventKind::Press
                                 && (key.code == KeyCode::Esc
                                     || (key.code == KeyCode::Char('c')
@@ -492,14 +498,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                             *last_space_press = None;
                                         } else {
                                             *last_space_press = Some(now);
-                                            if !*is_flying && *is_grounded {
-                                                *velocity_y = 7.75;
+                                            if !*is_flying {
+                                                if is_swimming {
+                                                    *velocity_y = 4.0;
+                                                } else if *is_grounded {
+                                                    *velocity_y = 7.75;
+                                                }
                                             }
                                         }
                                     } else {
                                         *last_space_press = Some(now);
-                                        if !*is_flying && *is_grounded {
-                                            *velocity_y = 7.75;
+                                        if !*is_flying {
+                                            if is_swimming {
+                                                *velocity_y = 4.0;
+                                            } else if *is_grounded {
+                                                *velocity_y = 7.75;
+                                            }
                                         }
                                     }
                                 }
@@ -647,8 +661,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => {
                 mouse_look.update_camera(camera)?;
 
-                let speed = 5.0;
-                let gravity = -20.0;
+                let is_swimming = world.get_block(
+                    camera.position.x.floor() as i32,
+                    (camera.position.y + 1.0).floor() as i32,
+                    camera.position.z.floor() as i32,
+                ) == Block::Water && !*is_flying;
+
+                let speed = if is_swimming { 2.5 } else { 5.0 };
+                let gravity = if is_swimming { -2.0 } else { -20.0 };
                 let delta_time = delta_time;
 
                 // Apply gravity if not flying
@@ -705,7 +725,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_x.x + ox).floor() as i32;
                         let world_y = (next_pos_x.y + py).floor() as i32;
                         let world_z = (next_pos_x.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
                             collided_x = true;
                             break;
                         }
@@ -732,7 +752,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_z.x + ox).floor() as i32;
                         let world_y = (next_pos_z.y + py).floor() as i32;
                         let world_z = (next_pos_z.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
                             collided_z = true;
                             break;
                         }
@@ -759,7 +779,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let world_x = (next_pos_y.x + ox).floor() as i32;
                         let world_y = (next_pos_y.y + py).floor() as i32;
                         let world_z = (next_pos_y.z + oz).floor() as i32;
-                        if world.get_block(world_x, world_y, world_z) != Block::Air {
+                        if world.get_block(world_x, world_y, world_z) != Block::Air && world.get_block(world_x, world_y, world_z) != Block::Water {
                             collided_y = true;
                             break;
                         }
@@ -862,6 +882,7 @@ fn block_shade(block: Block, brightness: f32) -> (char, TerminalColor) {
         Block::Log => (0.66, TerminalColor::Ansi256(94)),
         Block::Leaves => (0.88, TerminalColor::Ansi256(34)),
         Block::Cloud => (1.0, TerminalColor::Ansi256(255)),
+        Block::Water => (0.6, TerminalColor::Ansi256(21)),
         Block::Air => (0.0, TerminalColor::Ansi256(250)),
     };
     (shade_char(brightness * material_brightness), color)
