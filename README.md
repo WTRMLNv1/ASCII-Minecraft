@@ -20,6 +20,10 @@ fucktastic!
 - works on resize in theory (breaks slightly)
 - ~~work in the mines~~ mining was also implemented (DDA Ray casting 🤓👆) with 4.5 blocks distance max to vapourise blocks (no delay lmfao)
 
+## gameplay typa shi
+
+<video src="gameplay_demo.mp4">
+
 ## how its built
 
 held together mostly with rust and spite, specifically:
