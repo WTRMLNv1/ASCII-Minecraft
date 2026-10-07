@@ -5,6 +5,7 @@ pub const CHUNK_SIZE: i32 = 16;
 pub const WORLD_HEIGHT: i32 = 64;
 pub const RENDER_DISTANCE: i32 = 4;
 pub const CLOUD_HEIGHT: i32 = 60;
+pub const SEA_LEVEL: i32 = 30;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Block {
@@ -172,22 +173,24 @@ impl World {
                         let x = ox + lx;
                         let z = oz + lz;
 
-                        if y == WORLD_HEIGHT - 1 || self.get_block(x, y + 1, z) == Block::Air {
+                        if y == WORLD_HEIGHT - 1
+                            || face_is_exposed(block, self.get_block(x, y + 1, z))
+                        {
                             faces_to_add.push((block, x, y, z, FaceDirection::Top));
                         }
-                        if y == 0 || self.get_block(x, y - 1, z) == Block::Air {
+                        if y == 0 || face_is_exposed(block, self.get_block(x, y - 1, z)) {
                             faces_to_add.push((block, x, y, z, FaceDirection::Bottom));
                         }
-                        if self.get_block(x - 1, y, z) == Block::Air {
+                        if face_is_exposed(block, self.get_block(x - 1, y, z)) {
                             faces_to_add.push((block, x, y, z, FaceDirection::West));
                         }
-                        if self.get_block(x + 1, y, z) == Block::Air {
+                        if face_is_exposed(block, self.get_block(x + 1, y, z)) {
                             faces_to_add.push((block, x, y, z, FaceDirection::East));
                         }
-                        if self.get_block(x, y, z - 1) == Block::Air {
+                        if face_is_exposed(block, self.get_block(x, y, z - 1)) {
                             faces_to_add.push((block, x, y, z, FaceDirection::North));
                         }
-                        if self.get_block(x, y, z + 1) == Block::Air {
+                        if face_is_exposed(block, self.get_block(x, y, z + 1)) {
                             faces_to_add.push((block, x, y, z, FaceDirection::South));
                         }
                     }
@@ -325,11 +328,7 @@ impl World {
                 }
             }
         }
-        self.populate_trees(&mut blocks, chunk_x, chunk_z);
-        self.populate_clouds(&mut blocks, chunk_x, chunk_z);
-
         // Water fill pass
-        const SEA_LEVEL: i32 = 30;
         for lz in 0..CHUNK_SIZE {
             for lx in 0..CHUNK_SIZE {
                 let h = self.surface_height(ox + lx, oz + lz);
@@ -343,6 +342,8 @@ impl World {
                 }
             }
         }
+        self.populate_trees(&mut blocks, chunk_x, chunk_z);
+        self.populate_clouds(&mut blocks, chunk_x, chunk_z);
 
         let mut faces = Vec::new();
         for lz in 0..CHUNK_SIZE {
@@ -354,29 +355,35 @@ impl World {
                     if block == Block::Air {
                         continue;
                     }
-                    if y == WORLD_HEIGHT - 1 || blocks[block_index(lx, y + 1, lz)] == Block::Air {
+                    if y == WORLD_HEIGHT - 1
+                        || face_is_exposed(block, blocks[block_index(lx, y + 1, lz)])
+                    {
                         add_face(&mut faces, block, x, y, z, FaceDirection::Top);
                     }
-                    if y == 0 || blocks[block_index(lx, y - 1, lz)] == Block::Air {
+                    if y == 0 || face_is_exposed(block, blocks[block_index(lx, y - 1, lz)]) {
                         add_face(&mut faces, block, x, y, z, FaceDirection::Bottom);
                     }
-                    if (lx == 0 && self.generated_block_at(x - 1, y, z) == Block::Air)
-                        || (lx > 0 && blocks[block_index(lx - 1, y, lz)] == Block::Air)
+                    if (lx == 0 && face_is_exposed(block, self.generated_block_at(x - 1, y, z)))
+                        || (lx > 0 && face_is_exposed(block, blocks[block_index(lx - 1, y, lz)]))
                     {
                         add_face(&mut faces, block, x, y, z, FaceDirection::West);
                     }
-                    if (lx == CHUNK_SIZE - 1 && self.generated_block_at(x + 1, y, z) == Block::Air)
-                        || (lx < CHUNK_SIZE - 1 && blocks[block_index(lx + 1, y, lz)] == Block::Air)
+                    if (lx == CHUNK_SIZE - 1
+                        && face_is_exposed(block, self.generated_block_at(x + 1, y, z)))
+                        || (lx < CHUNK_SIZE - 1
+                            && face_is_exposed(block, blocks[block_index(lx + 1, y, lz)]))
                     {
                         add_face(&mut faces, block, x, y, z, FaceDirection::East);
                     }
-                    if (lz == 0 && self.generated_block_at(x, y, z - 1) == Block::Air)
-                        || (lz > 0 && blocks[block_index(lx, y, lz - 1)] == Block::Air)
+                    if (lz == 0 && face_is_exposed(block, self.generated_block_at(x, y, z - 1)))
+                        || (lz > 0 && face_is_exposed(block, blocks[block_index(lx, y, lz - 1)]))
                     {
                         add_face(&mut faces, block, x, y, z, FaceDirection::North);
                     }
-                    if (lz == CHUNK_SIZE - 1 && self.generated_block_at(x, y, z + 1) == Block::Air)
-                        || (lz < CHUNK_SIZE - 1 && blocks[block_index(lx, y, lz + 1)] == Block::Air)
+                    if (lz == CHUNK_SIZE - 1
+                        && face_is_exposed(block, self.generated_block_at(x, y, z + 1)))
+                        || (lz < CHUNK_SIZE - 1
+                            && face_is_exposed(block, blocks[block_index(lx, y, lz + 1)]))
                     {
                         add_face(&mut faces, block, x, y, z, FaceDirection::South);
                     }
@@ -393,6 +400,9 @@ impl World {
         let surface = self.surface_height(x, z);
         if y <= surface {
             return block_at_height(surface, y);
+        }
+        if y <= SEA_LEVEL {
+            return Block::Water;
         }
         if y == CLOUD_HEIGHT && self.is_cloud_at(x, z) {
             return Block::Cloud;
@@ -473,6 +483,11 @@ impl World {
     }
 
     fn tree_kind_at_origin(&self, x: i32, z: i32) -> Option<()> {
+        // Trees must start above the waterline.  This also keeps the lazy
+        // neighboring-chunk generator consistent with populated chunks.
+        if self.surface_height(x, z) <= SEA_LEVEL {
+            return None;
+        }
         let forest_origin = x.rem_euclid(6) == 3 && z.rem_euclid(6) == 3;
         let forest_value = self.forest_noise.get([x as f64 * 0.025, z as f64 * 0.025]);
         if forest_origin && forest_value > 0.12 {
@@ -575,6 +590,17 @@ fn block_at_height(surface: i32, y: i32) -> Block {
         Block::Stone
     }
 }
+
+fn face_is_exposed(block: Block, neighbor: Block) -> bool {
+    match block {
+        // Water only needs faces against air; faces against terrain would be
+        // invisible and prevent translucent water from revealing that terrain.
+        Block::Water => neighbor == Block::Air,
+        // Opaque blocks need a face at a water boundary so they can show
+        // through the translucent water pass.
+        _ => matches!(neighbor, Block::Air | Block::Water),
+    }
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FaceDirection {
     Top,
@@ -660,6 +686,36 @@ mod tests {
             world.generated_block_at(tree.0 + 2, trunk_base + 4, tree.1) == Block::Leaves,
             "the tree canopy should use leaf blocks"
         );
+    }
+
+    #[test]
+    fn waterline_is_fixed_for_generated_and_lazy_neighbor_blocks() {
+        let world = World::new(1234);
+        let shore = (-128..128)
+            .flat_map(|z| (-128..128).map(move |x| (x, z)))
+            .find(|&(x, z)| world.surface_height(x, z) < SEA_LEVEL)
+            .expect("the sampled world should contain land below sea level");
+
+        assert_eq!(
+            world.generated_block_at(shore.0, SEA_LEVEL, shore.1),
+            Block::Water
+        );
+        assert_eq!(
+            world.generated_block_at(shore.0, SEA_LEVEL + 1, shore.1),
+            Block::Air
+        );
+    }
+
+    #[test]
+    fn trees_only_generate_above_the_waterline() {
+        let world = World::new(1234);
+        for z in -128..128 {
+            for x in -128..128 {
+                if world.tree_kind_at_origin(x, z).is_some() {
+                    assert!(world.surface_height(x, z) > SEA_LEVEL);
+                }
+            }
+        }
     }
 
     #[test]
